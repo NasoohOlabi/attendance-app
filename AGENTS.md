@@ -6,7 +6,7 @@ Scanner source lives in `scanner/`. `node scripts/scanner-release.mjs` publishes
 
 ## Git
 
-At the end of every user prompt, commit the work from that prompt. When a prompt produced more than one independent change, keep the commits small and atomic. Do not commit secrets (service-account JSON, `attendance.config.json`, private keys). Do not push unless the user asked.
+At the end of every user prompt, commit the work from that prompt. When a prompt produced more than one independent change, keep the commits small and atomic. Do not commit secrets (service-account JSON, `attendance.config.json`, private keys). Do not push unless the user asked. `bun run release` bumps the version, commits that version on the current code, then builds the installer from that commit. Do not ship an installer whose version commit is behind the code.
 
 ## Stack
 
