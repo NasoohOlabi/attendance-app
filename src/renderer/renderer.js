@@ -444,7 +444,7 @@ search.addEventListener("keydown", (event) => {
   const first = list.querySelector("button");
   if (first && !first.disabled) first.click();
 });
-document.querySelector("#discard-scans").addEventListener("click", async () => {
+async function dropKeptScans() {
   if (typeof window.attendance.discardScans !== "function") {
     error.hidden = false;
     error.textContent = translate("Close the app and open it again, then cancel.");
@@ -461,7 +461,10 @@ document.querySelector("#discard-scans").addEventListener("click", async () => {
     error.hidden = false;
     error.textContent = translate(result.error);
   }
-});
+}
+
+document.querySelector("#discard-scans").addEventListener("click", dropKeptScans);
+document.querySelector("#enroll-cancel").addEventListener("click", dropKeptScans);
 document.querySelector("#more-scans").addEventListener("click", async () => {
   if (typeof window.attendance.addMoreScans !== "function") {
     error.hidden = false;
