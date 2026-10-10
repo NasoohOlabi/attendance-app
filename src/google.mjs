@@ -24,6 +24,16 @@ export function isSheetPermissionError(message) {
   return /does not have permission|insufficient permission/i.test(String(message || ""));
 }
 
+/** A dropped network. Permission and bad requests stay errors. */
+export function isOfflineError(message) {
+  const text = String(message || "");
+  if (isSheetPermissionError(text)) return false;
+  if (/failed \((400|401|403|404)\)/.test(text)) return false;
+  return /ENOTFOUND|EAI_AGAIN|ENETUNREACH|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|EPIPE|fetch failed|socket hang up|network|offline|failed \(no status\)|failed \(502\)|failed \(503\)|failed \(504\)/i.test(
+    text,
+  );
+}
+
 export async function createGoogle(config) {
   const keyFile = config.serviceAccountJson;
   if (!keyFile) {

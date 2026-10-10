@@ -590,6 +590,111 @@ export function stampFromClock(date, clock, timeZone = "Asia/Damascus") {
   return `${day} ${hour}:${minute}:00`;
 }
 
+/** Damascus day for a queued mark, so a late sync still hits the day it was scanned. */
+export function outboxDay(at, timeZone = "Asia/Damascus") {
+  const when = at instanceof Date ? at : new Date(at);
+  if (Number.isNaN(when.getTime())) return "";
+  return attendanceStamp(when, timeZone).split(" ")[0];
+}
+
+function attendanceKey(item) {
+  const id = canonicalStudentId(item?.studentId);
+  if (id) return `id:${id}`;
+  const row = Number(item?.rowNumber) || 0;
+  return row ? `row:${row}` : "";
+}
+
+function sameAttendance(a, b) {
+  const left = attendanceKey(a);
+  const right = attendanceKey(b);
+  return Boolean(left) && left === right;
+}
+
+export function attendanceListed(people, person) {
+  return (people || []).some((item) => sameAttendance(item, person));
+}
+
+function queuedPerson(person, kind) {
+  return {
+    kind,
+    studentId: canonicalStudentId(person.studentId) || String(person.studentId || "").trim(),
+    studentName: String(person.studentName || "").trim(),
+    rowNumber: Number(person.rowNumber) || 0,
+    at: person.at,
+    time: String(person.time || "").trim(),
+    logRow: Number(person.logRow) || 0,
+    cell: false,
+    log: false,
+  };
+}
+
+/** One present mark per student per day. A waiting undo for that day is dropped. */
+export function queuePresent(items, person) {
+  const list = items || [];
+  const day = outboxDay(person.at);
+  if (!attendanceKey(person) || !day) return list;
+  const rest = list.filter((item) => !(item.kind === "absent" && sameAttendance(item, person) && outboxDay(item.at) === day));
+  if (rest.some((item) => item.kind === "present" && sameAttendance(item, person) && outboxDay(item.at) === day)) return rest;
+  return [...rest, queuedPerson(person, "present")];
+}
+
+/** Undo before the sheet write drops the mark. After the write, queue a clear. */
+export function queueAbsent(items, person) {
+  const list = items || [];
+  const day = outboxDay(person.at);
+  if (!attendanceKey(person) || !day) return list;
+  const open = list.find((item) => item.kind === "present" && sameAttendance(item, person) && outboxDay(item.at) === day);
+  if (open && !open.cell && !open.log) {
+    return list.filter((item) => item !== open && !(item.kind === "time" && sameAttendance(item, person) && outboxDay(item.at) === day));
+  }
+  const kept = list.filter((item) => {
+    if (sameAttendance(item, person) && outboxDay(item.at) === day && (item.kind === "time" || item === open)) return false;
+    return true;
+  });
+  if (kept.some((item) => item.kind === "absent" && sameAttendance(item, person) && outboxDay(item.at) === day)) return kept;
+  const absent = queuedPerson({ ...person, studentName: person.studentName || open?.studentName || "" }, "absent");
+  absent.log = Boolean(open) && !open.log;
+  return [...kept, absent];
+}
+
+/** A clock change before the log row exists stays on the present mark. */
+export function queueClock(items, person) {
+  const list = items || [];
+  const day = outboxDay(person.at);
+  if (!attendanceKey(person) || !day) return list;
+  const open = list.find((item) => item.kind === "present" && sameAttendance(item, person) && outboxDay(item.at) === day && !item.log);
+  if (open) return list.map((item) => (item === open ? { ...item, time: String(person.time || "").trim() } : item));
+  const rest = list.filter((item) => !(item.kind === "time" && sameAttendance(item, person) && outboxDay(item.at) === day));
+  return [...rest, queuedPerson(person, "time")];
+}
+
+/** Today's sheet list plus marks that have not been written yet. */
+export function overlayPresent(people, items, day) {
+  const list = (people || []).map((person) => ({ ...person }));
+  for (const item of items || []) {
+    if (outboxDay(item.at) !== day) continue;
+    if (item.kind === "absent") {
+      for (let i = list.length - 1; i >= 0; i--) {
+        if (sameAttendance(list[i], item)) list.splice(i, 1);
+      }
+      continue;
+    }
+    const hit = list.find((person) => sameAttendance(person, item));
+    if (item.kind === "present" && !hit) {
+      list.push({
+        name: item.studentName || item.studentId,
+        studentId: item.studentId,
+        rowNumber: item.rowNumber,
+        time: item.time || "",
+        logRow: 0,
+      });
+    } else if (hit && item.time) {
+      hit.time = item.time;
+    }
+  }
+  return list;
+}
+
 export function findDateColumn(header, date) {
   const when = date instanceof Date ? date : new Date(date);
   if (Number.isNaN(when.getTime())) return null;

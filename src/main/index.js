@@ -8,6 +8,7 @@ import { appLogFile, startAppLog } from "../log.mjs";
 import {
   createGoogle,
   explainApiFailure,
+  isOfflineError,
   isSheetPermissionError,
   appendSheetRow,
   clearSheetBelowHeader,
@@ -27,6 +28,7 @@ import {
   clearFingerprints,
   loadIndex,
   mergeStudents,
+  attendanceListed,
   attendanceLogRow,
   attendanceStamp,
   attachLogTimes,
@@ -38,8 +40,12 @@ import {
   fingerprintFiles,
   fingerprintHeaderMissing,
   fingerprintSheetRow,
+  logHits,
   logLayout,
-  matchingLogRow,
+  overlayPresent,
+  queueAbsent,
+  queueClock,
+  queuePresent,
   planClearRow,
   stampFromClock,
   withScanTimes,
@@ -228,12 +234,16 @@ async function reloadStudents(config) {
   const merged = mergeStudents(index, rows);
   await saveIndex(config.fingerprintDir, merged);
   cacheFromSheet(merged, rows);
-  publish({ present: await timesFor(config, presentToday(rows, new Date())) });
+  sheetPeople = await timesFor(config, presentToday(rows, new Date()));
+  publish({ present: shownPresent() });
   return { merged, rows, title };
 }
 
 let scanTimes = { day: "", rows: {} };
 let namedClocks = {};
+let sheetPeople = [];
+let outbox = [];
+let flushTail = Promise.resolve();
 
 function scanTimesPath() {
   return path.join(homedir(), "Masjid", "scan-times.json");
@@ -248,6 +258,7 @@ async function loadScanTimes() {
   } catch {
     // No remembered scans yet today.
   }
+  await loadOutbox();
   try {
     namedClocks = clocksFromAppLog(await readFile(appLogFile(), "utf8"));
   } catch {
@@ -276,6 +287,103 @@ function forgetScan(rowNumber) {
   writeFile(scanTimesPath(), JSON.stringify(scanTimes)).catch((err) => console.error(err.message));
 }
 
+function outboxPath() {
+  return path.join(homedir(), "Masjid", "attendance-outbox.json");
+}
+
+function todayDay() {
+  return attendanceStamp(new Date()).split(" ")[0];
+}
+
+async function loadOutbox() {
+  outbox = [];
+  try {
+    const saved = JSON.parse(await readFile(outboxPath(), "utf8"));
+    if (Array.isArray(saved?.items)) outbox = saved.items;
+  } catch {
+    outbox = [];
+  }
+}
+
+async function saveOutbox() {
+  await mkdir(path.dirname(outboxPath()), { recursive: true });
+  await writeFile(outboxPath(), JSON.stringify({ items: outbox }));
+}
+
+function waitingNote() {
+  return outbox.length ? "Waiting to sync" : "";
+}
+
+function shownPresent() {
+  return overlayPresent(sheetPeople, outbox, todayDay());
+}
+
+function rosterStudent(student) {
+  const id = canonicalStudentId(student?.studentId);
+  return (
+    Object.values(cached).find((item) => canonicalStudentId(item.studentId) === id) || {
+      studentId: id || student?.studentId || "",
+      studentName: student?.studentName || "",
+      rowNumber: Number(student?.rowNumber) || 0,
+    }
+  );
+}
+
+function queuedFrom(student, extra = {}) {
+  const found = rosterStudent(student);
+  return {
+    studentId: canonicalStudentId(found.studentId) || found.studentId,
+    studentName: found.studentName || student?.studentName || "",
+    rowNumber: Number(found.rowNumber) || Number(student?.rowNumber) || 0,
+    at: new Date().toISOString(),
+    time: clockFromStamp(attendanceStamp(new Date())),
+    ...extra,
+  };
+}
+
+function publishShown(extra = {}) {
+  const syncNote = outbox.length ? "Waiting to sync" : state.syncNote === "Waiting to sync" ? "" : state.syncNote;
+  publish({ present: shownPresent(), syncNote, ...extra });
+}
+
+/** Show the mark now. The sheet write runs after this returns. */
+function acceptPresent(student) {
+  const person = queuedFrom(student);
+  if (!person.studentId) return { op: "missing-id" };
+  if (attendanceListed(shownPresent(), person)) return { op: "update", value: "حاضر" };
+  outbox = queuePresent(outbox, person);
+  if (person.rowNumber) rememberScan(person.rowNumber, new Date());
+  saveOutbox().catch((err) => console.error(err.message));
+  publishShown();
+  void flushOutbox();
+  return { op: "update", value: "حاضر" };
+}
+
+function acceptAbsent(rowNumber, logRow) {
+  const person = shownPresent().find((item) => item.rowNumber === Number(rowNumber));
+  if (!person) return { ok: false, error: "That student is not on the sheet." };
+  outbox = queueAbsent(outbox, { ...person, at: new Date().toISOString(), logRow });
+  forgetScan(person.rowNumber);
+  saveOutbox().catch((err) => console.error(err.message));
+  publishShown({ detail: `${person.name} removed from today.`, error: "" });
+  void flushOutbox();
+  return { ok: true };
+}
+
+function acceptClock(rowNumber, logRow, time) {
+  const stamp = stampFromClock(new Date(), time);
+  if (!stamp) return { ok: false, error: "Enter a time like 16:55." };
+  const person = shownPresent().find((item) => item.rowNumber === Number(rowNumber));
+  if (!person) return { ok: false, error: "That student is not on the sheet." };
+  const clock = clockFromStamp(stamp);
+  outbox = queueClock(outbox, { ...person, at: new Date().toISOString(), time: clock, logRow });
+  rememberClock(person.rowNumber, clock);
+  saveOutbox().catch((err) => console.error(err.message));
+  publishShown({ detail: `Time for ${person.name} set to ${stamp}.`, error: "" });
+  void flushOutbox();
+  return { ok: true };
+}
+
 async function timesFor(config, people) {
   let timed = people.map((item) => ({ ...item, time: "", logRow: 0 }));
   if (config.logSpreadsheetId) {
@@ -292,38 +400,155 @@ async function timesFor(config, people) {
 }
 
 async function publishPresent(config) {
-  if (!client || sheetDenied) return;
-  const { rows } = await getSheetGrid(client, config.spreadsheetId, config.sheetGid);
-  publish({ present: await timesFor(config, presentToday(rows, new Date())) });
+  if (!client || sheetDenied) {
+    publish({ present: shownPresent() });
+    return;
+  }
+  try {
+    const { rows } = await getSheetGrid(client, config.spreadsheetId, config.sheetGid);
+    sheetPeople = await timesFor(config, presentToday(rows, new Date()));
+  } catch (err) {
+    if (!isOfflineError(err.message)) console.error(err.message);
+  }
+  publish({ present: shownPresent() });
 }
 
-async function markAttendance(config, student, present) {
-  if (!client || sheetDenied) return { op: "skipped" };
-  const today = new Date();
-  const [{ title, rows }, layout] = await Promise.all([
-    getSheetGrid(client, config.spreadsheetId, config.sheetGid),
-    getDateHeader(client, config.spreadsheetId, config.sheetGid),
-  ]);
-  const plan = planAttendance(rows, student.studentId, today, present, layout);
-  if (plan.insert) await ensureDateColumn(client, config.spreadsheetId, config.sheetGid, today);
-  if (plan.op !== "update") return plan;
-  await writeAttendanceCell(client, config.spreadsheetId, title, plan.a1, plan.value);
-  if (plan.value === "حاضر") rememberScan(plan.rowNumber, today);
-  if (plan.value === "حاضر" && config.logSpreadsheetId) {
+async function writeQueuedPresent(config, item) {
+  const when = new Date(item.at);
+  if (!item.cell) {
+    const [{ title, rows }, layout] = await Promise.all([
+      getSheetGrid(client, config.spreadsheetId, config.sheetGid),
+      getDateHeader(client, config.spreadsheetId, config.sheetGid),
+    ]);
+    const plan = planAttendance(rows, item.studentId, when, true, layout);
+    if (plan.insert) await ensureDateColumn(client, config.spreadsheetId, config.sheetGid, when);
+    if (plan.op !== "update") return plan.op;
+    await writeAttendanceCell(client, config.spreadsheetId, title, plan.a1, plan.value);
+    item.cell = true;
+    item.rowNumber = plan.rowNumber || item.rowNumber;
+    await saveOutbox();
+  }
+  if (!item.log) {
+    if (config.logSpreadsheetId) {
+      try {
+        const log = await getSheetGrid(client, config.logSpreadsheetId, config.logSheetGid);
+        const header = log.rows[0] || ["الطالب", "حضور"];
+        const values = attendanceLogRow(item.studentId, when, header, item.studentName);
+        const stamp = item.time ? stampFromClock(when, item.time) : "";
+        if (stamp) values[logLayout(header).time] = stamp;
+        await appendSheetRow(client, config.logSpreadsheetId, config.logSheetGid, values);
+      } catch (err) {
+        if (isOfflineError(err.message) || isSheetPermissionError(err.message)) throw err;
+        console.error(err.message);
+        item.logError = err.message;
+      }
+    }
+    item.log = true;
+    await saveOutbox();
+  }
+  return "ok";
+}
+
+async function writeQueuedAbsent(config, item) {
+  const when = new Date(item.at);
+  if (!item.cell) {
+    const [{ title, rows }, layout] = await Promise.all([
+      getSheetGrid(client, config.spreadsheetId, config.sheetGid),
+      getDateHeader(client, config.spreadsheetId, config.sheetGid),
+    ]);
+    const plan = item.rowNumber
+      ? planClearRow(rows, item.rowNumber, when)
+      : planAttendance(rows, item.studentId, when, false, layout);
+    if (plan.op !== "update") return plan.op;
+    await writeAttendanceCell(client, config.spreadsheetId, title, plan.a1, "");
+    item.cell = true;
+    await saveOutbox();
+  }
+  if (!item.log && config.logSpreadsheetId) {
+    const log = await getSheetGrid(client, config.logSpreadsheetId, config.logSheetGid);
+    const hits = logHits(log.rows, item.studentId, when);
+    if (hits.length) await deleteSheetRows(client, config.logSpreadsheetId, config.logSheetGid, hits.map((hit) => hit.rowNumber));
+  }
+  item.log = true;
+  await saveOutbox();
+  return "ok";
+}
+
+async function writeQueuedClock(config, item) {
+  if (!config.logSpreadsheetId) return "ok";
+  const when = new Date(item.at);
+  const stamp = stampFromClock(when, item.time);
+  if (!stamp) return "ok";
+  const log = await getSheetGrid(client, config.logSpreadsheetId, config.logSheetGid);
+  const header = log.rows[0] || ["الطالب", "حضور"];
+  const hits = logHits(log.rows, item.studentId, when);
+  const hit = hits.find((row) => row.rowNumber === item.logRow) || hits[hits.length - 1];
+  if (hit) {
+    await writeSheetCell(client, config.logSpreadsheetId, log.title, `${columnLetter(logLayout(header).time)}${hit.rowNumber}`, stamp);
+  } else {
+    const values = attendanceLogRow(item.studentId, when, header, item.studentName);
+    values[logLayout(header).time] = stamp;
+    await appendSheetRow(client, config.logSpreadsheetId, config.logSheetGid, values);
+  }
+  return "ok";
+}
+
+async function writeQueued(config, item) {
+  if (item.kind === "absent") return writeQueuedAbsent(config, item);
+  if (item.kind === "time") return writeQueuedClock(config, item);
+  return writeQueuedPresent(config, item);
+}
+
+function flushOutbox() {
+  const run = flushTail.then(() => drainOutbox(), () => drainOutbox());
+  flushTail = run.then(
+    () => {},
+    () => {},
+  );
+  return run;
+}
+
+async function drainOutbox() {
+  if (!client || sheetDenied || !currentConfig) return;
+  const config = currentConfig;
+  while (outbox.length && client && !sheetDenied) {
+    const item = outbox[0];
     try {
-      const log = await getSheetGrid(client, config.logSpreadsheetId, config.logSheetGid);
-      await appendSheetRow(
-        client,
-        config.logSpreadsheetId,
-        config.logSheetGid,
-        attendanceLogRow(student.studentId, today, log.rows[0] || ["الطالب", "حضور"], student.studentName),
-      );
+      const result = await writeQueued(config, item);
+      outbox.shift();
+      await saveOutbox();
+      publish({ present: shownPresent(), syncNote: waitingNote() });
+      if (result !== "ok") publish({ error: markDetail({ op: result, value: "حاضر" }) || "The sheet was not changed." });
     } catch (err) {
       console.error(err.message);
-      plan.logError = err.message;
+      if (isSheetPermissionError(err.message)) {
+        sheetDenied = true;
+        const note = await failureNote(config, err);
+        publish({ syncNote: note, error: note });
+        return;
+      }
+      if (isOfflineError(err.message)) {
+        publish({ syncNote: "Waiting to sync", error: "" });
+        return;
+      }
+      const note = await failureNote(config, err);
+      publish({ syncNote: note, error: note });
+      return;
     }
   }
-  return plan;
+  if (outbox.length) return;
+  publish({ syncNote: `Synced ${new Date().toLocaleTimeString()}` });
+  try {
+    await reloadStudents(config);
+  } catch (err) {
+    if (isSheetPermissionError(err.message)) {
+      sheetDenied = true;
+      const note = await failureNote(config, err);
+      publish({ syncNote: note, error: note });
+    } else if (!isOfflineError(err.message)) {
+      console.error(err.message);
+    }
+  }
 }
 
 function markDetail(plan) {
@@ -401,16 +626,23 @@ async function syncOnce(config) {
 
 async function safeSync(config, gen) {
   if (sheetDenied) return;
-  publish({ syncNote: "Syncing…" }, gen);
+  if (!client) {
+    await prepareGoogle(config, gen);
+    if (!client) return;
+  }
+  publish({ syncNote: outbox.length ? "Waiting to sync" : "Syncing…" }, gen);
   try {
+    await flushOutbox();
+    if (sheetDenied || gen !== generation) return;
     await exclusive(() => syncOnce(config));
     if (sheetDenied) return;
-    publish({ syncNote: `Synced ${new Date().toLocaleTimeString()}` }, gen);
+    if (!outbox.length) publish({ syncNote: `Synced ${new Date().toLocaleTimeString()}` }, gen);
   } catch (err) {
-    const note = await failureNote(config, err);
+    const offline = isOfflineError(err.message);
+    const note = offline ? "Waiting to sync" : await failureNote(config, err);
     if (isSheetPermissionError(err.message)) sheetDenied = true;
     console.log(note);
-    publish({ syncNote: note, error: note }, gen);
+    publish({ syncNote: note, error: offline ? "" : note }, gen);
   }
 }
 
@@ -592,16 +824,9 @@ async function handleCapture(config, result, body, gen, scanImage) {
     const student = decision.student;
     const who = student.studentName || student.studentId;
     console.log(`matched ${who || student.templateFile}`);
-    let extra = "";
-    try {
-      extra = markDetail(await markAttendance(config, student, true));
-    } catch (err) {
-      extra = await failureNote(config, err);
-      if (isSheetPermissionError(err.message)) sheetDenied = true;
-      console.error(err.message);
-    }
+    const plan = acceptPresent(student);
+    const extra = markDetail(plan);
     const detail = [`Matched ${who}`, extra].filter(Boolean).join(" ");
-    const marked = extra.startsWith("Marked");
     publish(
       {
         phase: pause ? state.phase : "ready",
@@ -615,10 +840,11 @@ async function handleCapture(config, result, body, gen, scanImage) {
         scanImage,
         scanImages: [],
         error: extra.startsWith("Marked") ? "" : extra,
+        present: shownPresent(),
+        syncNote: waitingNote() || state.syncNote,
       },
       gen,
     );
-    if (marked) await publishPresent(config);
     return;
   }
   if (!decision.picker) {
@@ -736,6 +962,7 @@ async function runLoop(config, gen) {
           if (isSheetPermissionError(err.message)) console.log(await failureNote(config, err));
         }
         await reloadStudents(config);
+        void flushOutbox();
       });
     } catch (err) {
       const note = await failureNote(config, err);
@@ -756,7 +983,7 @@ async function runLoop(config, gen) {
       }
       if (sheetReady && !sheetDenied && Date.now() >= nextSync) {
         nextSync = Date.now() + config.syncIntervalSeconds * 1000;
-        await safeSync(config, gen);
+        void safeSync(config, gen);
         if (gen !== generation) return;
         if (!pending && !pause && String(state.detail).startsWith("Syncing")) {
           publish({ detail: "Listening" }, gen);
@@ -1069,45 +1296,31 @@ async function assignStudent(key) {
     },
   };
   let extra = "Saved on this computer.";
-  let problem = "";
-  let fingerprintNote = "";
   if (client && canonicalStudentId(draft.studentId)) {
-    try {
-      await appendFingerprints(config, draft.studentId, savedBodies, draft.capturedAt);
-    } catch (err) {
+    void appendFingerprints(config, draft.studentId, savedBodies, draft.capturedAt).catch((err) => {
       console.error(err.message);
-      fingerprintNote = "The fingerprint sheet was not written.";
-    }
+      publish({ detail: `${state.detail} The fingerprint sheet was not written.`.trim() });
+    });
   }
-  if (client && !sheetDenied) {
-    try {
-      const plan = await markAttendance(config, draft, true);
-      const note = markDetail(plan);
-      if (note) extra = problem ? `${note} ${problem}` : note;
-    } catch (err) {
-      console.error(err.message);
-      if (isSheetPermissionError(err.message)) sheetDenied = true;
-      problem = await failureNote(config, err);
-      extra = problem;
-    }
-  }
-  if (fingerprintNote) extra = `${extra} ${fingerprintNote}`;
+  const plan = acceptPresent(draft);
+  const note = markDetail(plan);
+  if (note) extra = note;
   const who = draft.studentName || draft.studentId;
   const detail = batchSave
     ? `Saved ${savedCount} scan${savedCount === 1 ? "" : "s"}. ${extra}`
     : `Linked ${who}. ${extra}`;
-  const marked = String(extra).includes("Marked present");
   const hadGallery = batchImages.length > 1;
   clearBatchImages();
   publish({
     ...linked,
     detail,
-    error: problem,
+    error: "",
     enroll: null,
     scanImages: [],
+    present: shownPresent(),
+    syncNote: waitingNote() || state.syncNote,
     ...(hadGallery ? { scanImage: scanImageUrl() } : {}),
   });
-  if (marked) await publishPresent(config);
   console.log(`linked ${who} file=${templateFile} scans=${savedCount}`);
 }
 
@@ -1284,78 +1497,13 @@ function registerIpc() {
     }
   });
   ipcMain.handle("undoAttendance", async (_event, input) => {
-    if (!currentConfig || !client || sheetDenied) return { ok: false, error: "The sheet is not available." };
-    const rowNumber = Number(input?.rowNumber);
-    const logRow = Number(input?.logRow) || 0;
-    try {
-      await exclusive(async () => {
-        const config = currentConfig;
-        const today = new Date();
-        const { title, rows } = await getSheetGrid(client, config.spreadsheetId, config.sheetGid);
-        const plan = planClearRow(rows, rowNumber, today);
-        if (plan.op !== "update") {
-          throw new Error(plan.op === "missing-date" ? "Today's date column is missing." : "That student is not on the sheet.");
-        }
-        await writeAttendanceCell(client, config.spreadsheetId, title, plan.a1, "");
-        forgetScan(plan.rowNumber);
-        let logNote = "";
-        if (logRow > 1 && config.logSpreadsheetId) {
-          try {
-            const log = await getSheetGrid(client, config.logSpreadsheetId, config.logSheetGid);
-            if (matchingLogRow(log.rows, logRow, plan.studentId, today)) {
-              await deleteSheetRows(client, config.logSpreadsheetId, config.logSheetGid, [logRow]);
-            } else {
-              logNote = " The time log row no longer matches, so it was left.";
-            }
-          } catch (err) {
-            console.error(err.message);
-            logNote = " The time log was not changed.";
-          }
-        }
-        await publishPresent(config);
-        publish({ detail: `${plan.name} removed from today.${logNote}`, error: logNote ? logNote.trim() : "" });
-        console.log(`undo attendance ${plan.name} row=${plan.rowNumber}`);
-      });
-      return { ok: true };
-    } catch (err) {
-      console.error(err);
-      return { ok: false, error: err.message };
-    }
+    if (!currentConfig) return { ok: false, error: "The sheet is not available." };
+    return acceptAbsent(Number(input?.rowNumber), Number(input?.logRow) || 0);
   });
   ipcMain.handle("setAttendanceTime", async (_event, input) => {
-    if (!currentConfig || !client || sheetDenied) return { ok: false, error: "The sheet is not available." };
-    const stamp = stampFromClock(new Date(), input?.time);
-    if (!stamp) return { ok: false, error: "Enter a time like 16:55." };
+    if (!currentConfig) return { ok: false, error: "The sheet is not available." };
     if (!currentConfig.logSpreadsheetId) return { ok: false, error: "No time log sheet is configured." };
-    const rowNumber = Number(input?.rowNumber);
-    const logRow = Number(input?.logRow) || 0;
-    try {
-      await exclusive(async () => {
-        const config = currentConfig;
-        const today = new Date();
-        const { rows } = await getSheetGrid(client, config.spreadsheetId, config.sheetGid);
-        const plan = planClearRow(rows, rowNumber, today);
-        if (!plan.name) throw new Error("That student is not on the sheet.");
-        const log = await getSheetGrid(client, config.logSpreadsheetId, config.logSheetGid);
-        const header = log.rows[0] || ["الطالب", "حضور"];
-        const match = matchingLogRow(log.rows, logRow, plan.studentId, today);
-        if (match) {
-          await writeSheetCell(client, config.logSpreadsheetId, log.title, `${columnLetter(match.timeColumn)}${logRow}`, stamp);
-        } else {
-          const values = attendanceLogRow(plan.studentId, today, header, plan.studentName);
-          values[logLayout(header).time] = stamp;
-          await appendSheetRow(client, config.logSpreadsheetId, config.logSheetGid, values);
-        }
-        rememberClock(plan.rowNumber, clockFromStamp(stamp));
-        await publishPresent(config);
-        publish({ detail: `Time for ${plan.name} set to ${stamp}.`, error: "" });
-        console.log(`attendance time ${plan.name} ${stamp}`);
-      });
-      return { ok: true };
-    } catch (err) {
-      console.error(err);
-      return { ok: false, error: err.message };
-    }
+    return acceptClock(Number(input?.rowNumber), Number(input?.logRow) || 0, input?.time);
   });
   ipcMain.handle("clearFingerprints", async () => {
     if (!currentConfig?.fingerprintDir) return { ok: false, error: "The app is still starting." };

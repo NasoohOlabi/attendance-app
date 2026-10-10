@@ -73,6 +73,7 @@ const AR = {
   "Trying again": "محاولة أخرى",
   "Scanner not ready": "الماسح غير جاهز",
   Setup: "الإعداد",
+  "Waiting to sync": "بانتظار المزامنة",
   "Marked present.": "سُجّل حاضراً.",
   "Marked present. The time log was not written.": "سُجّل حاضراً. لم يُكتب سجل الوقت.",
   "Today's date column is missing, so the sheet was not changed.": "عمود تاريخ اليوم غير موجود، فلم يتغير الكشف.",

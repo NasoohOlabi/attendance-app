@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { legacyUserDataPath, LEGACY_USER_DATA_DIR, loadConfig, requireGoogleConfig } from "../src/config.mjs";
 import { appendAppLog, appLogFile, appLogLine } from "../src/log.mjs";
-import { attendanceCellUpdate, createGoogle, explainApiFailure } from "../src/google.mjs";
+import { attendanceCellUpdate, createGoogle, explainApiFailure, isOfflineError } from "../src/google.mjs";
 import { translate } from "../src/renderer/i18n.js";
 import { fingerCue, presentTrace, screenForPhase } from "../src/renderer/view.js";
 import { appendScanTrace, beginScanAttempt, captureKillDelay, formatCommand, identifyArgs, interpretIdentify, interpretScan, mergeCapturedFiles, nextCapture, planScanRetry, scanArgs, SCAN_OUTAGE_MESSAGE, SCAN_RETRY_PAUSE_MS } from "../src/scan.mjs";
@@ -38,7 +38,11 @@ import {
   fingerprintHeaderMissing,
   fingerprintSheetRow,
   FINGERPRINT_HEADER,
+  overlayPresent,
   planAttendance,
+  queueAbsent,
+  queueClock,
+  queuePresent,
   bestCandidate,
   captureScreen,
   PARTIAL_THRESHOLD,
@@ -451,6 +455,31 @@ test("a sheet permission error asks to share as Editor", () => {
   assert.equal(explainApiFailure(other, email).includes("Share as Editor"), false);
   const permission = "Google API GET https://sheets.googleapis.com/v4/spreadsheets/x failed (403): The caller does not have permission";
   assert.match(explainApiFailure(permission, email), /Sheet permission denied\. Share as Editor with editor@example/);
+});
+
+test("a mark shows up before the sheet answers, and an early undo cancels it", () => {
+  const at = "2026-10-10T05:00:00.000Z";
+  const day = "10/10/2026";
+  const person = { studentId: "00 00 000 001", studentName: "اسم أول", rowNumber: 3, at, time: "08:00" };
+  const queued = queuePresent([], person);
+  assert.equal(queued.length, 1);
+  assert.equal(queuePresent(queued, person).length, 1);
+  const shown = overlayPresent([], queued, day);
+  assert.equal(shown[0].name, "اسم أول");
+  assert.equal(shown[0].time, "08:00");
+  const edited = queueClock(queued, { ...person, time: "08:15" });
+  assert.equal(edited[0].time, "08:15");
+  assert.equal(edited[0].kind, "present");
+  assert.deepEqual(queueAbsent(edited, person), []);
+  const written = [{ ...edited[0], cell: true, log: true }];
+  const undo = queueAbsent(written, { ...person, logRow: 4 });
+  assert.equal(undo[0].kind, "absent");
+  assert.equal(undo[0].log, false);
+  assert.deepEqual(overlayPresent([{ name: "اسم أول", studentId: "00 00 000 001", rowNumber: 3, time: "08:00", logRow: 4 }], undo, day), []);
+  const half = [{ ...edited[0], cell: true, log: false }];
+  assert.equal(queueAbsent(half, person)[0].log, true);
+  assert.equal(isOfflineError("Google API GET https://sheets.googleapis.com failed (no status): getaddrinfo ENOTFOUND"), true);
+  assert.equal(isOfflineError("The caller does not have permission"), false);
 });
 
 test("a present mark puts the حاضر checkbox back on that cell", () => {
