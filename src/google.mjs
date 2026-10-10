@@ -286,6 +286,7 @@ export function attendanceCellUpdate(value) {
         values: [{ userEnteredValue: "حاضر" }],
       },
       strict: true,
+      showCustomUi: true,
     },
   };
   if (text !== "") cell.userEnteredValue = { stringValue: text };
@@ -331,7 +332,7 @@ export async function writeAttendanceCell(client, spreadsheetId, sheetTitle, a1,
   });
 }
 
-/** An empty string still counts in COUNTA on these checkboxes. Clear the cell instead. */
+/** Log cells only. An empty attendance cell must not come through here: values.clear deletes the checkbox. */
 export async function writeSheetCell(client, spreadsheetId, sheetTitle, a1, value) {
   if (String(value ?? "") === "") {
     const range = encodeURIComponent(`${quoteTitle(sheetTitle)}!${a1}`);

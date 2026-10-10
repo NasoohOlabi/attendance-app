@@ -92,7 +92,7 @@ Symptom: today’s cell shows the word `حاضر` and the checkbox is gone, or t
 
 Cause: the date checkbox is a `BOOLEAN` rule whose checked value is `حاضر`. `spreadsheets.values.update` stores that word and deletes the rule. Boolean `FALSE` is non-empty, so `COUNTA` counts it as present.
 
-Fix: `writeAttendanceCell` sets `حاضر` or clears the cell and writes the same checkbox rule in that `updateCells` call. Do not write `TRUE` or `FALSE`. Do not write extra test cells.
+Fix: `writeAttendanceCell` sets `حاضر` or clears the value and writes the same checkbox rule, with `showCustomUi`, in that `updateCells` call. `values.clear` deletes the rule, so undo must not use it. Do not write `TRUE` or `FALSE`. Do not write extra test cells.
 
 ### The time log never grows
 

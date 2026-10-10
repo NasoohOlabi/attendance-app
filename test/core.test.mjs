@@ -459,6 +459,7 @@ test("a present mark puts the حاضر checkbox back on that cell", () => {
   assert.equal(present.cell.userEnteredValue.stringValue, "حاضر");
   assert.equal(present.cell.dataValidation.condition.type, "BOOLEAN");
   assert.equal(present.cell.dataValidation.strict, true);
+  assert.equal(present.cell.dataValidation.showCustomUi, true);
   assert.deepEqual(present.cell.dataValidation.condition.values, [{ userEnteredValue: "حاضر" }]);
   const absent = attendanceCellUpdate("");
   assert.equal(absent.cell.userEnteredValue, undefined);
