@@ -2,8 +2,10 @@ import { readFile } from "node:fs/promises";
 import { GoogleAuth } from "google-auth-library";
 import { planDateColumn, sheetsSerial } from "./store.mjs";
 
-// The attendance tab is a date grid. Callers write حاضر or clear that one cell.
-// The log sheet and the fingerprints tab get their own rows, keyed by the Marif id.
+// The attendance tab is a date grid. A present cell is the checkbox whose checked
+// value is حاضر. values.update stores that word and deletes the checkbox, so the
+// mark goes through updateCells with the rule beside it. The log sheet and the
+// fingerprints tab get their own rows, keyed by the Marif id.
 
 export const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
 
@@ -272,6 +274,61 @@ export async function deleteSheetRows(client, spreadsheetId, sheetGid, rowNumber
     },
   });
   return props.title;
+}
+
+/** The date-grid checkbox. Checked stores حاضر. Unchecked is an empty cell, so COUNTA skips it. */
+export function attendanceCellUpdate(value) {
+  const text = String(value ?? "");
+  const cell = {
+    dataValidation: {
+      condition: {
+        type: "BOOLEAN",
+        values: [{ userEnteredValue: "حاضر" }],
+      },
+      strict: true,
+    },
+  };
+  if (text !== "") cell.userEnteredValue = { stringValue: text };
+  return { cell, fields: "userEnteredValue,dataValidation" };
+}
+
+function a1Start(a1) {
+  const match = /^([A-Z]+)(\d+)$/.exec(String(a1 || "").toUpperCase());
+  if (!match) throw new Error(`Not a single cell: ${a1}`);
+  let column = 0;
+  for (const ch of match[1]) column = column * 26 + (ch.charCodeAt(0) - 64);
+  return { columnIndex: column - 1, rowIndex: Number(match[2]) - 1 };
+}
+
+async function sheetIdByTitle(client, spreadsheetId, title) {
+  const meta = await grequest(client, {
+    url: sheetsUrl(spreadsheetId, "?fields=sheets.properties(sheetId,title)"),
+  });
+  const sheet = (meta.sheets || []).find((item) => item.properties?.title === title);
+  if (!sheet) throw new Error(`Sheet ${title} was not found.`);
+  return sheet.properties.sheetId;
+}
+
+/** One date cell. Puts the حاضر checkbox back in the same write that sets or clears the value. */
+export async function writeAttendanceCell(client, spreadsheetId, sheetTitle, a1, value) {
+  const sheetId = await sheetIdByTitle(client, spreadsheetId, sheetTitle);
+  const start = a1Start(a1);
+  const { cell, fields } = attendanceCellUpdate(value);
+  await grequest(client, {
+    url: sheetsUrl(spreadsheetId, ":batchUpdate"),
+    method: "POST",
+    data: {
+      requests: [
+        {
+          updateCells: {
+            start: { sheetId, rowIndex: start.rowIndex, columnIndex: start.columnIndex },
+            rows: [{ values: [cell] }],
+            fields,
+          },
+        },
+      ],
+    },
+  });
 }
 
 /** An empty string still counts in COUNTA on these checkboxes. Clear the cell instead. */

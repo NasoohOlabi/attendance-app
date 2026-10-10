@@ -15,6 +15,7 @@ import {
   ensureDateColumn,
   getDateHeader,
   getSheetGrid,
+  writeAttendanceCell,
   writeSheetCell,
   writeSheetValues,
 } from "../google.mjs";
@@ -306,7 +307,7 @@ async function markAttendance(config, student, present) {
   const plan = planAttendance(rows, student.studentId, today, present, layout);
   if (plan.insert) await ensureDateColumn(client, config.spreadsheetId, config.sheetGid, today);
   if (plan.op !== "update") return plan;
-  await writeSheetCell(client, config.spreadsheetId, title, plan.a1, plan.value);
+  await writeAttendanceCell(client, config.spreadsheetId, title, plan.a1, plan.value);
   if (plan.value === "حاضر") rememberScan(plan.rowNumber, today);
   if (plan.value === "حاضر" && config.logSpreadsheetId) {
     try {
@@ -1295,7 +1296,7 @@ function registerIpc() {
         if (plan.op !== "update") {
           throw new Error(plan.op === "missing-date" ? "Today's date column is missing." : "That student is not on the sheet.");
         }
-        await writeSheetCell(client, config.spreadsheetId, title, plan.a1, "");
+        await writeAttendanceCell(client, config.spreadsheetId, title, plan.a1, "");
         forgetScan(plan.rowNumber);
         let logNote = "";
         if (logRow > 1 && config.logSpreadsheetId) {

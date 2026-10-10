@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { legacyUserDataPath, LEGACY_USER_DATA_DIR, loadConfig, requireGoogleConfig } from "../src/config.mjs";
 import { appendAppLog, appLogFile, appLogLine } from "../src/log.mjs";
-import { createGoogle, explainApiFailure } from "../src/google.mjs";
+import { attendanceCellUpdate, createGoogle, explainApiFailure } from "../src/google.mjs";
 import { translate } from "../src/renderer/i18n.js";
 import { fingerCue, presentTrace, screenForPhase } from "../src/renderer/view.js";
 import { appendScanTrace, beginScanAttempt, captureKillDelay, formatCommand, identifyArgs, interpretIdentify, interpretScan, mergeCapturedFiles, nextCapture, planScanRetry, scanArgs, SCAN_OUTAGE_MESSAGE, SCAN_RETRY_PAUSE_MS } from "../src/scan.mjs";
@@ -451,6 +451,18 @@ test("a sheet permission error asks to share as Editor", () => {
   assert.equal(explainApiFailure(other, email).includes("Share as Editor"), false);
   const permission = "Google API GET https://sheets.googleapis.com/v4/spreadsheets/x failed (403): The caller does not have permission";
   assert.match(explainApiFailure(permission, email), /Sheet permission denied\. Share as Editor with editor@example/);
+});
+
+test("a present mark puts the حاضر checkbox back on that cell", () => {
+  const present = attendanceCellUpdate("حاضر");
+  assert.equal(present.fields, "userEnteredValue,dataValidation");
+  assert.equal(present.cell.userEnteredValue.stringValue, "حاضر");
+  assert.equal(present.cell.dataValidation.condition.type, "BOOLEAN");
+  assert.equal(present.cell.dataValidation.strict, true);
+  assert.deepEqual(present.cell.dataValidation.condition.values, [{ userEnteredValue: "حاضر" }]);
+  const absent = attendanceCellUpdate("");
+  assert.equal(absent.cell.userEnteredValue, undefined);
+  assert.equal(absent.cell.dataValidation.condition.values[0].userEnteredValue, "حاضر");
 });
 
 test("a successful match still plans one حاضر cell", () => {

@@ -40,7 +40,7 @@ Mosque grid: the `spreadsheetId` / `sheetGid` in `attendance.config.json`, tab t
 
 - Column A header `إسم كامل` is the student name. Column B header `معرف` is the Marif id (`00 00 000 001`). Link the roster, the time log, and fingerprints by that id. The same name may appear twice when the ids differ. Two rows with the same id are a duplicate: `planAttendance` returns `duplicate` and writes nothing. A row with no id is not written.
 - Row 1 is headers. Row 2 is counts (`COUNTA`). Students start at row 3.
-- A present cell is the Arabic word `حاضر`. An absent cell is empty. `attendanceValue` returns that. The cells are checkbox-validated, but the sheet’s own marks are the string `حاضر`, and `COUNTA` counts every non-empty cell, so `TRUE` / `FALSE` is the wrong value.
+- A present cell is the date checkbox, and that checkbox’s checked value is the Arabic word `حاضر`. An absent cell is empty, which leaves the box unchecked. `attendanceValue` returns that. `COUNTA` counts every non-empty cell, so `TRUE` / `FALSE` is the wrong value.
 - Write the one date cell for that id. Do not restyle the sheet, do not write a whole row, and do not add a row for an unknown name.
 - Date columns are not in strict calendar order. Today’s column is whichever header matches today’s day and month (`findDateColumn`). Inserting `معرف` moved the first date from M to N.
 
@@ -48,7 +48,7 @@ Time log: `logSpreadsheetId` / `logSheetGid` in `attendance.config.json`, tab `A
 
 The log append runs after the cell write. If the append throws, the حاضر cell stays and the detail line is “Marked present. The time log was not written.”
 
-Today’s list can undo one student: that clears their date cell with the Sheets clear call and deletes the matching time-log row for today, matched by id. Writing `""` leaves the checkbox, so the row-2 count still includes that student. Changing the clock keeps the Damascus date and rewrites that log row (`stampFromClock`). When the log has no time, the clock shows when the finger was scanned.
+Today’s list can undo one student: that clears their date cell and leaves the checkbox, then deletes the matching time-log row for today, matched by id. Writing `""` through the values API leaves the checkbox and `COUNTA` still counts it, so the clear goes through `writeAttendanceCell`. Changing the clock keeps the Damascus date and rewrites that log row (`stampFromClock`). When the log has no time, the clock shows when the finger was scanned.
 
 Diagnostic lines for this app go to `~/Masjid/logs/attendance-YYYY-MM-DD.log`. That file gets scanner lines, sheet failures, renderer errors, and uncaught exceptions. Look there first when something breaks after the terminal is gone. The roster file `log.json` inside the fingerprints folder is the enrolled-student list, not this bug log.
 
@@ -86,13 +86,13 @@ Fix: do not force-kill a process that owns the scanner. Let the capture exit. `O
 
 The host kill timer is `2 * timeout + grace` (45s when timeout is 20 and grace is 5), not `timeout + 5`. The first finger-down extends the CLI deadline once by another full timeout. `SCAN_RETRY_PAUSE_MS` is 2000. The running exe is `staging/scanner/zk4500.exe`, produced by `node scripts/scanner-release.mjs`.
 
-### The date cell becomes TRUE, or the count jumps
+### The checkbox disappears, or the count jumps
 
-Symptom: today’s cell is a boolean, or the row-2 count is higher than the number of students who were here.
+Symptom: today’s cell shows the word `حاضر` and the checkbox is gone, or the cell is a boolean and the row-2 count is higher than the number of students who were here.
 
-Cause: an earlier write stored boolean `true`. The sheet’s own marks are the string `حاضر`. `FALSE` is non-empty, so `COUNTA` counts it as present.
+Cause: the date checkbox is a `BOOLEAN` rule whose checked value is `حاضر`. `spreadsheets.values.update` stores that word and deletes the rule. Boolean `FALSE` is non-empty, so `COUNTA` counts it as present.
 
-Fix: write `حاضر` with `valueInputOption=RAW`. Clear an absent cell with `values.clear`. Writing `""` leaves the checkbox, and `COUNTA` still counts it. Do not write extra test cells.
+Fix: `writeAttendanceCell` sets `حاضر` or clears the cell and writes the same checkbox rule in that `updateCells` call. Do not write `TRUE` or `FALSE`. Do not write extra test cells.
 
 ### The time log never grows
 

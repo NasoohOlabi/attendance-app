@@ -610,7 +610,7 @@ export function findDateColumn(header, date) {
   return bare;
 }
 
-/** The date grid stores حاضر, or nothing. A checkbox TRUE is not the sheet's mark. */
+/** The date checkbox's checked value is حاضر. An absent cell is empty. Boolean TRUE is a different box. */
 export function attendanceValue(present) {
   return present ? "حاضر" : "";
 }
@@ -714,7 +714,7 @@ export function fingerprintFiles(rows) {
 }
 
 /**
- * One cell. Never a whole row. present writes حاضر; anything else clears the cell.
+ * One cell. Never a whole row. present writes the checkbox value حاضر; anything else clears the cell.
  * The student id is the Marif value. A missing id or two rows with that id write nothing.
  * @returns {{op:string, a1?:string, value?:string, values?:string[][], rowNumber?:number, columnIndex?:number, studentId?:string}}
  */
