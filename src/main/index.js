@@ -52,6 +52,7 @@ import {
   withScanTimes,
   parseAttendanceGrid,
   presentToday,
+  studentProfile,
   pendingPath,
   planAttendance,
   putStudent,
@@ -93,6 +94,7 @@ let printsEpoch = 0;
 let lock = Promise.resolve();
 let sheetDenied = false;
 let sheetReported = false;
+let attendanceRows = [];
 let scannerReady = true;
 let scanFailStreak = 0;
 
@@ -202,6 +204,26 @@ function cacheFromSheet(merged, rows) {
   }
 }
 
+function profileFieldsFor(student) {
+  if (!student || !attendanceRows.length) return [];
+  const grid = parseAttendanceGrid(attendanceRows);
+  const id = canonicalStudentId(student.studentId);
+  const rowNumber = Number(student.rowNumber);
+  const byRow = rowNumber ? grid.students.find((item) => item.rowNumber === rowNumber) : null;
+  const found = byRow || (id ? grid.students.find((item) => item.studentId === id) : null);
+  if (!found) return [];
+  return studentProfile(grid.header, attendanceRows[found.rowNumber - 1]).fields;
+}
+
+function lastMatchOf(student, at) {
+  return {
+    studentName: student?.studentName || "",
+    studentId: student?.studentId || "",
+    at,
+    fields: profileFieldsFor(student),
+  };
+}
+
 function viewStudent(student) {
   return {
     key: student.rowNumber ? String(student.rowNumber) : studentKey(student),
@@ -229,6 +251,7 @@ function reportSheet(title, rows) {
 async function reloadStudents(config) {
   catalogAt = Date.now();
   const { title, rows } = await getSheetGrid(client, config.spreadsheetId, config.sheetGid);
+  attendanceRows = rows;
   reportSheet(title, rows);
   const problem = sheetProblem(rows);
   if (problem) throw new Error(problem);
@@ -849,11 +872,7 @@ async function handleCapture(config, result, body, gen, scanImage) {
         phase: pause ? state.phase : "ready",
         headline: pause ? state.headline : "Place a finger",
         detail: pause ? state.detail : detail,
-        lastMatch: {
-          studentName: student.studentName || "",
-          studentId: student.studentId || "",
-          at: new Date().toISOString(),
-        },
+        lastMatch: lastMatchOf(student, new Date().toISOString()),
         scanImage,
         scanImages: [],
         error: extra.startsWith("Marked") ? "" : extra,
@@ -1306,11 +1325,7 @@ async function assignStudent(key) {
   const linked = {
     phase: "ready",
     headline: "Place a finger",
-    lastMatch: {
-      studentName: draft.studentName,
-      studentId: draft.studentId,
-      at: draft.capturedAt,
-    },
+    lastMatch: lastMatchOf(draft, draft.capturedAt),
   };
   let extra = "Saved on this computer.";
   if (client && canonicalStudentId(draft.studentId)) {

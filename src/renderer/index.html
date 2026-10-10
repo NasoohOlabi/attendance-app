@@ -47,13 +47,17 @@
           <button id="enroll-done" class="primary" type="button" data-i18n="Done">Done</button>
           <button id="enroll-cancel" class="secondary" type="button" data-i18n="Cancel">Cancel</button>
         </div>
-        <article id="last" class="card" hidden>
-          <p class="label" data-i18n="Last match">Last match</p>
-          <strong id="last-name" dir="auto"></strong>
-          <span id="last-meta" dir="ltr"></span>
-        </article>
         </div>
-        <ol id="trace" class="log"></ol>
+        <div class="result">
+          <article id="last" class="card" hidden>
+            <p class="label" data-i18n="Last match">Last match</p>
+            <strong id="last-name" dir="auto"></strong>
+            <p id="last-meta" class="profile-meta"></p>
+            <div id="last-chips" class="profile-chips" hidden></div>
+            <dl id="last-fields" class="profile-fields" hidden></dl>
+          </article>
+          <ol id="trace" class="log"></ol>
+        </div>
         <aside id="today" class="today" data-i18n-aria="Here today" aria-label="Here today">
           <p class="label" data-i18n="Today">Today</p>
           <p class="today-count" id="today-count"><span dir="ltr">–</span></p>

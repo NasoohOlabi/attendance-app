@@ -383,6 +383,54 @@ function nameFromRow(row, cols) {
   return [given, family].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
 }
 
+function cellText(value) {
+  return String(value ?? "").replace(/\u00a0/g, " ").trim().replace(/\s+/g, " ");
+}
+
+/** Phone-like cells stay on their own row. Short facts become chips. */
+function profileKind(value) {
+  if (/^(true|false)$/i.test(value)) return "flag";
+  if (/^\d{1,4}%$/.test(value)) return "meter";
+  const compact = value.replace(/\s/g, "");
+  const digits = compact.replace(/\D/g, "");
+  if (digits.length >= 7 && digits.length / compact.length >= 0.7) return "phone";
+  if (value.length > 24) return "line";
+  return "chip";
+}
+
+function profileRank(kind) {
+  if (kind === "meter") return 0;
+  if (kind === "flag") return 1;
+  if (kind === "chip") return 2;
+  if (kind === "phone") return 3;
+  return 4;
+}
+
+/**
+ * Profile for one Info row. Date columns, the full name, the id, and empty cells stay out.
+ * TRUE/FALSE becomes Yes/No so the card does not show a checkbox literal.
+ */
+export function studentProfile(header, row) {
+  const cells = (header || []).map(headerText);
+  const cols = rosterColumns(header);
+  const fields = [];
+  for (let i = 0; i < cells.length; i++) {
+    if (!cells[i] || parseDateHeader(cells[i])) continue;
+    if (i === cols.full || i === cols.id) continue;
+    const raw = cellText(row?.[i]);
+    if (!raw) continue;
+    const kind = profileKind(raw);
+    const value = /^true$/i.test(raw) ? "Yes" : /^false$/i.test(raw) ? "No" : raw;
+    fields.push({ label: cells[i], value, kind });
+  }
+  fields.sort((a, b) => profileRank(a.kind) - profileRank(b.kind));
+  return {
+    name: cols.full >= 0 ? cellText(row?.[cols.full]) : "",
+    id: cols.id >= 0 ? canonicalStudentId(row?.[cols.id]) : "",
+    fields,
+  };
+}
+
 const EMPTY_GRID = { headerRowNumber: 0, summaryRowNumber: 0, header: [], idColumn: -1, students: [], duplicates: [] };
 
 export function parseAttendanceGrid(rows) {

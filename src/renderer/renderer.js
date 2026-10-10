@@ -17,6 +17,8 @@ const printsPending = document.querySelector("#prints-pending");
 const last = document.querySelector("#last");
 const lastName = document.querySelector("#last-name");
 const lastMeta = document.querySelector("#last-meta");
+const lastChips = document.querySelector("#last-chips");
+const lastFields = document.querySelector("#last-fields");
 const todayCount = document.querySelector("#today-count");
 const todayEmpty = document.querySelector("#today-empty");
 const todayList = document.querySelector("#today-list");
@@ -380,6 +382,36 @@ async function saveTodayTime(person, input) {
   }
 }
 
+function renderProfile(fields) {
+  lastChips.replaceChildren();
+  lastFields.replaceChildren();
+  for (const field of Array.isArray(fields) ? fields : []) {
+    const value = translate(field.value);
+    if (field.kind === "phone" || field.kind === "line") {
+      const dt = document.createElement("dt");
+      dt.textContent = field.label;
+      const dd = document.createElement("dd");
+      dd.dir = field.kind === "phone" ? "ltr" : "auto";
+      dd.textContent = value;
+      lastFields.append(dt, dd);
+      continue;
+    }
+    const chip = document.createElement("span");
+    if (field.kind === "meter") chip.className = "is-meter";
+    else if (field.kind === "flag") chip.className = field.value === "No" ? "is-off" : "is-flag";
+    chip.title = field.label;
+    if (field.kind !== "meter") {
+      const label = document.createElement("small");
+      label.textContent = field.label;
+      chip.append(label);
+    }
+    chip.append(document.createTextNode(value));
+    lastChips.append(chip);
+  }
+  lastChips.hidden = lastChips.childElementCount === 0;
+  lastFields.hidden = lastFields.childElementCount === 0;
+}
+
 function render(state) {
   lastState = state;
   const mode = screenForPhase(state.phase);
@@ -408,9 +440,25 @@ function render(state) {
       last.hidden = false;
       lastName.dir = "auto";
       lastName.textContent = state.lastMatch.studentName || state.lastMatch.studentId || translate("Student");
-      lastMeta.textContent = matchTime(state.lastMatch.at);
+      const when = matchTime(state.lastMatch.at);
+      lastMeta.replaceChildren();
+      if (state.lastMatch.studentId) {
+        const id = document.createElement("span");
+        id.dir = "ltr";
+        id.textContent = state.lastMatch.studentId;
+        lastMeta.append(id);
+      }
+      if (state.lastMatch.studentId && when) lastMeta.append(document.createTextNode("  ·  "));
+      if (when) {
+        const time = document.createElement("span");
+        time.dir = "ltr";
+        time.textContent = when;
+        lastMeta.append(time);
+      }
+      renderProfile(state.lastMatch.fields);
     } else {
       last.hidden = true;
+      renderProfile([]);
     }
   } else {
     showFingers(fingerReady, printsReady, [], "");

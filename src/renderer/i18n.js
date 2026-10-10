@@ -56,6 +56,8 @@ const AR = {
   "Close the app and open it again, then add more scans.": "أغلق التطبيق وافتحه من جديد، ثم أضف مسحات.",
   "Close the app and open it again, then delete the fingerprints.": "أغلق التطبيق وافتحه من جديد، ثم احذف البصمات.",
   Student: "طالب",
+  Yes: "نعم",
+  No: "لا",
   "add scans": "إضافة مسحات",
   replace: "استبدال",
   "Waiting for a finger": "بانتظار إصبع",

@@ -21,6 +21,7 @@ import {
   logPath,
   mergeStudents,
   parseAttendanceGrid,
+  studentProfile,
   presentToday,
   planClearRow,
   attachLogTimes,
@@ -193,6 +194,31 @@ test("attendance grid reads the name and the Marif id", () => {
   assert.deepEqual(grid.duplicates, []);
   assert.equal(canonicalStudentId("  00  00 000 001 "), "00 00 000 001");
   assert.equal(canonicalStudentId("اسم"), "");
+});
+
+test("a match profile is the filled Info cells that are not dates", () => {
+  const header = ["إسم كامل", "معرف", "أهل", "طالب", "أهل 2", "ملزم", "الإسم", "كنية", "حلقة", "صف", "الحضور", "مصنف", "نسبة الحضور", "Sat 10/10"];
+  const row = ["محمد أسامي", "00 00 000 005", "09 52 397 099", "", "طريق المحولة روضة أمل الغد بناء ١٣١", "TRUE", "محمد", "أسامي", "أبو بكر", "5", "1", "", "100%", "حاضر"];
+  const profile = studentProfile(header, row);
+  assert.equal(profile.name, "محمد أسامي");
+  assert.equal(profile.id, "00 00 000 005");
+  assert.deepEqual(
+    profile.fields.map((field) => [field.label, field.value, field.kind]),
+    [
+      ["نسبة الحضور", "100%", "meter"],
+      ["ملزم", "Yes", "flag"],
+      ["الإسم", "محمد", "chip"],
+      ["كنية", "أسامي", "chip"],
+      ["حلقة", "أبو بكر", "chip"],
+      ["صف", "5", "chip"],
+      ["الحضور", "1", "chip"],
+      ["أهل", "09 52 397 099", "phone"],
+      ["أهل 2", "طريق المحولة روضة أمل الغد بناء ١٣١", "line"],
+    ],
+  );
+  const off = studentProfile(header, ["اسم", "00 00 000 001", "", "", "", "FALSE"]);
+  assert.equal(off.fields.find((field) => field.label === "ملزم").value, "No");
+  assert.equal(studentProfile(header, ["اسم", "00 00 000 001"]).fields.length, 0);
 });
 
 test("today's tally is the حاضر names in today's column", () => {
