@@ -1,0 +1,84 @@
+{
+  "name": "attendance-app",
+  "version": "0.1.2",
+  "private": true,
+  "description": "Masjid attendance fingerprint app",
+  "author": "Masjid",
+  "type": "module",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "start": "electron-vite dev",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "dist": "node scripts/scanner-release.mjs && bun run build && electron-builder --win nsis",
+    "release": "bun pm version patch --no-git-tag-version && bun run dist",
+    "test": "node --test test/core.test.mjs"
+  },
+  "packageManager": "bun@1.4.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "google-auth-library": "^10.3.0"
+  },
+  "devDependencies": {
+    "electron": "^38.8.6",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^4.0.1",
+    "vite": "^6.3.5"
+  },
+  "build": {
+    "appId": "com.masjid.attendance",
+    "productName": "Masjid Attendance",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "**/*",
+      "!src/**",
+      "!test/**",
+      "!release/**",
+      "!data/**",
+      "!scanner/**",
+      "!staging/**",
+      "!scripts/**",
+      "!plans/**",
+      "!electron.vite.config.js",
+      "!/*.json",
+      "package.json",
+      "!attendance.config.json",
+      "!service-account*.json",
+      "!**/*service-account*.json",
+      "!**/*.md"
+    ],
+    "asar": true,
+    "extraResources": [
+      {
+        "from": "staging/scanner",
+        "to": "scanner"
+      },
+      {
+        "from": "src/renderer/fonts",
+        "to": "fonts",
+        "filter": ["OFL-*.txt"]
+      }
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": "nsis",
+      "executableName": "Masjid Attendance",
+      "signExecutable": false,
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "guid": "2febcda6-3658-5c7c-9dfa-528fe71d9a9a",
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": false,
+      "shortcutName": "Masjid Attendance",
+      "uninstallDisplayName": "Masjid Attendance",
+      "artifactName": "Masjid-Attendance-Setup.${ext}"
+    }
+  }
+}

@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Masjid Attendance</title>
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <script>
+      try {
+        if (localStorage.getItem("attendance.lang") === "ar") {
+          document.documentElement.lang = "ar";
+          document.documentElement.dir = "rtl";
+        }
+        const font = localStorage.getItem("attendance.font");
+        document.documentElement.dataset.font = font === "tajawal" || font === "plex" || font === "naskh" ? font : "cairo";
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div class="app">
+      <header>
+        <p class="kicker" data-i18n="Attendance">Attendance</p>
+        <button id="settings" class="ghost" type="button" data-i18n="Settings">Settings</button>
+      </header>
+      <section id="ready" class="hero">
+        <h1 id="headline" data-i18n="Place a finger">Place a finger</h1>
+        <p class="detail"><span class="dot"></span><span id="detail" data-i18n="Listening">Listening</span></p>
+        <div id="place" class="place" data-cue="wait">
+          <svg class="scene" viewBox="0 0 120 96" width="132" height="106" aria-hidden="true">
+            <g class="scanner">
+              <rect class="body" x="16" y="70" width="88" height="20" rx="7"/>
+              <rect class="pad" x="40" y="74" width="40" height="12" rx="3"/>
+              <ellipse class="contact" cx="60" cy="80" rx="10" ry="3.2"/>
+            </g>
+            <g class="digit">
+              <path class="skin" d="M48 0h24v34c0 16-24 16-24 0z"/>
+              <path class="nail" d="M54 28c0-6 12-6 12 0v10c0 4-12 4-12 0z"/>
+              <path class="crease" d="M52 14h16"/>
+            </g>
+          </svg>
+          <span id="place-label" class="place-label" data-i18n="One moment">One moment</span>
+        </div>
+        <ol id="trace" class="log"></ol>
+        <aside id="today" class="today" data-i18n-aria="Here today" aria-label="Here today">
+          <p class="label" data-i18n="Today">Today</p>
+          <p class="today-count" id="today-count"><span dir="ltr">–</span></p>
+          <p id="today-empty" class="today-empty" data-i18n="Loading the sheet">Loading the sheet</p>
+          <ol id="today-list" class="today-list"></ol>
+        </aside>
+        <img id="finger-ready" class="finger" data-i18n-alt="Scanned finger" alt="Scanned finger" hidden />
+        <div id="prints-ready" class="prints" hidden></div>
+        <div id="enroll-actions" class="actions" hidden>
+          <button id="enroll-done" class="primary" type="button" data-i18n="Done">Done</button>
+        </div>
+        <article id="last" class="card" hidden>
+          <p class="label" data-i18n="Last match">Last match</p>
+          <strong id="last-name" dir="auto"></strong>
+          <span id="last-meta" dir="ltr"></span>
+        </article>
+      </section>
+      <section id="pending" hidden>
+        <div class="hero">
+          <div class="pending-title">
+            <h1 data-i18n="New fingerprint">New fingerprint</h1>
+            <button id="discard-scans" class="ghost" type="button" data-i18n="Cancel">Cancel</button>
+          </div>
+          <p class="detail" id="pending-detail" data-i18n="Choose who this print belongs to.">Choose who this print belongs to.</p>
+          <div id="prints-pending" class="prints pending-gallery" hidden>
+            <button id="more-scans" class="print-add" type="button" data-i18n-aria="Add more scans" aria-label="Add more scans">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <label>
+          <span data-i18n="Search students">Search students</span>
+          <input id="search" type="search" data-i18n-placeholder="Type a name" placeholder="Type a name" autocomplete="off" />
+        </label>
+        <p id="empty" data-i18n="No matching students" hidden>No matching students</p>
+        <ul id="list"></ul>
+      </section>
+      <section id="config" hidden>
+        <div class="hero">
+          <h1 data-i18n="Settings">Settings</h1>
+          <p class="detail" id="config-detail" data-i18n="Service account path, spreadsheet, gid, and scanner.">Service account path, spreadsheet, gid, and scanner.</p>
+        </div>
+        <div class="field">
+          <span id="language-label" data-i18n="Language">Language</span>
+          <div class="lang" role="group" dir="ltr" aria-labelledby="language-label">
+            <button id="lang-en" class="secondary" type="button" data-lang="en" aria-pressed="true">English</button>
+            <button id="lang-ar" class="secondary" type="button" data-lang="ar" aria-pressed="false">العربية</button>
+          </div>
+        </div>
+        <div class="field">
+          <span id="font-label" data-i18n="Arabic font">Arabic font</span>
+          <div class="fonts" role="group" dir="ltr" aria-labelledby="font-label">
+            <button class="secondary" type="button" data-font="cairo" aria-pressed="true">Cairo</button>
+            <button class="secondary" type="button" data-font="tajawal" aria-pressed="false">Tajawal</button>
+            <button class="secondary" type="button" data-font="plex" aria-pressed="false">IBM Plex Sans Arabic</button>
+            <button class="secondary" type="button" data-font="naskh" aria-pressed="false">Noto Naskh Arabic</button>
+          </div>
+        </div>
+        <label class="field"><span data-i18n="Service account JSON">Service account JSON</span>
+          <span class="file-row">
+            <input id="cfg-key" type="text" dir="ltr" />
+            <button class="secondary browse" type="button" data-pick="json" data-target="cfg-key" data-i18n="Browse">Browse</button>
+          </span>
+        </label>
+        <label class="field"><span data-i18n="Spreadsheet id">Spreadsheet id</span>
+          <input id="cfg-sheet" type="text" dir="ltr" />
+        </label>
+        <label class="field"><span data-i18n="Sheet gid">Sheet gid</span>
+          <input id="cfg-gid" type="text" inputmode="numeric" dir="ltr" />
+        </label>
+        <label class="field"><span>zk4500.exe</span>
+          <span class="file-row">
+            <input id="cfg-exe" type="text" dir="ltr" />
+            <button class="secondary browse" type="button" data-pick="exe" data-target="cfg-exe" data-i18n="Browse">Browse</button>
+          </span>
+        </label>
+        <p class="detail"><span data-i18n="Prints are stored in">Prints are stored in</span> <span id="cfg-dir" dir="ltr"></span></p>
+        <button id="clear-prints" class="danger" type="button" data-i18n="Delete all fingerprints">Delete all fingerprints</button>
+        <div class="actions">
+          <button id="save" class="primary" type="button" data-i18n="Save">Save</button>
+          <button id="cancel" class="secondary" type="button" data-i18n="Cancel">Cancel</button>
+        </div>
+      </section>
+      <p id="error" hidden></p>
+      <footer>
+        <span id="sync"></span>
+      </footer>
+    </div>
+    <div id="confirm" class="confirm" hidden>
+      <div class="confirm-card" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-detail">
+        <h2 id="confirm-title"></h2>
+        <p id="confirm-who"><span id="confirm-name" dir="auto"></span></p>
+        <p id="confirm-detail" class="detail"></p>
+        <div class="actions">
+          <button id="confirm-cancel" class="secondary" type="button" data-i18n="Cancel">Cancel</button>
+          <button id="confirm-ok" class="danger" type="button"></button>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/renderer.js"></script>
+  </body>
+</html>

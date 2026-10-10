@@ -1,0 +1,273 @@
+import { readFile } from "node:fs/promises";
+import { GoogleAuth } from "google-auth-library";
+import { planDateColumn, sheetsSerial } from "./store.mjs";
+
+// The attendance tab is a date grid. Callers write حاضر or clear that one cell.
+// The log sheet and the fingerprints tab get their own rows, keyed by the Marif id.
+
+export const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
+
+/** Share-as-Editor only when the API itself says the caller lacks permission. */
+export function explainApiFailure(message, email = "") {
+  const text = String(message || "").trim();
+  if (/protected cell|protected range/i.test(text)) {
+    return "That cell is in a protected range, so the sheet was not changed.";
+  }
+  const lacksPermission = /does not have permission|insufficient permission/i.test(text);
+  if (!lacksPermission) return text;
+  return email ? `Sheet permission denied. Share as Editor with ${email}` : "Sheet permission denied.";
+}
+
+export function isSheetPermissionError(message) {
+  return /does not have permission|insufficient permission/i.test(String(message || ""));
+}
+
+export async function createGoogle(config) {
+  const keyFile = config.serviceAccountJson;
+  if (!keyFile) {
+    throw new Error(
+      "Missing service account JSON path. Set GOOGLE_SERVICE_ACCOUNT_JSON or serviceAccountJson in attendance.config.json.",
+    );
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(await readFile(keyFile, "utf8"));
+  } catch (err) {
+    throw new Error(`Cannot read service account JSON at ${keyFile}: ${err.message}`);
+  }
+  if (!parsed.client_email || !parsed.private_key) {
+    throw new Error(`Service account JSON at ${keyFile} is missing client_email or private_key.`);
+  }
+
+  const auth = new GoogleAuth({ keyFile, scopes: SCOPES });
+  return auth.getClient();
+}
+
+async function grequest(client, opts) {
+  try {
+    const res = await client.request(opts);
+    return res.data;
+  } catch (err) {
+    const status = err.response?.status;
+    const body = err.response?.data;
+    const detail = typeof body === "string" ? body : JSON.stringify(body ?? err.message);
+    throw new Error(
+      `Google API ${opts.method ?? "GET"} ${opts.url} failed (${status ?? "no status"}): ${String(detail).slice(0, 500)}`,
+    );
+  }
+}
+
+function sheetsUrl(spreadsheetId, suffix) {
+  return `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}${suffix}`;
+}
+
+function quoteTitle(title) {
+  return `'${String(title).replaceAll("'", "''")}'`;
+}
+
+export async function getSheetGrid(client, spreadsheetId, sheetGid) {
+  const meta = await grequest(client, {
+    url: sheetsUrl(spreadsheetId, "?fields=sheets.properties(sheetId,title)"),
+  });
+  const sheet = (meta.sheets || []).find((item) => item.properties?.sheetId === Number(sheetGid));
+  if (!sheet) throw new Error(`Sheet gid ${sheetGid} was not found.`);
+  const title = sheet.properties.title;
+  const range = encodeURIComponent(`${quoteTitle(title)}!A:ZZ`);
+  const data = await grequest(client, {
+    url: sheetsUrl(spreadsheetId, `/values/${range}`),
+  });
+  return { title, rows: data.values ?? [] };
+}
+
+async function sheetMeta(client, spreadsheetId, sheetGid) {
+  const meta = await grequest(client, {
+    url: sheetsUrl(spreadsheetId, "?fields=sheets.properties(sheetId,title,gridProperties.rowCount)"),
+  });
+  const sheet = (meta.sheets || []).find((item) => item.properties?.sheetId === Number(sheetGid));
+  if (!sheet) throw new Error(`Sheet gid ${sheetGid} was not found.`);
+  return sheet.properties;
+}
+
+async function rowValues(client, spreadsheetId, title, row, render) {
+  const range = encodeURIComponent(`${quoteTitle(title)}!${row}:${row}`);
+  const data = await grequest(client, {
+    url: sheetsUrl(spreadsheetId, `/values/${range}?valueRenderOption=${render}`),
+  });
+  return data.values?.[0] || [];
+}
+
+export async function getDateHeader(client, spreadsheetId, sheetGid) {
+  const props = await sheetMeta(client, spreadsheetId, sheetGid);
+  const [formatted, serials, formulas] = await Promise.all([
+    rowValues(client, spreadsheetId, props.title, 1, "FORMATTED_VALUE"),
+    rowValues(client, spreadsheetId, props.title, 1, "UNFORMATTED_VALUE"),
+    rowValues(client, spreadsheetId, props.title, 2, "FORMULA"),
+  ]);
+  return {
+    title: props.title,
+    rowCount: props.gridProperties?.rowCount || formatted.length,
+    formatted,
+    formulas,
+    serials: serials.map((value) => (typeof value === "number" ? value : null)),
+  };
+}
+
+export async function insertDateColumn(client, spreadsheetId, sheetGid, plan) {
+  const props = await sheetMeta(client, spreadsheetId, sheetGid);
+  const source = encodeURIComponent(`${quoteTitle(props.title)}!${columnA1(plan.sourceIndex)}1`);
+  const sourceCell = await grequest(client, {
+    url: sheetsUrl(
+      spreadsheetId,
+      `?ranges=${source}&includeGridData=true&fields=sheets(properties.sheetId,data.rowData.values(userEnteredFormat.numberFormat))`,
+    ),
+  });
+  const sourceSheet = (sourceCell.sheets || []).find((item) => item.properties?.sheetId === Number(sheetGid));
+  const numberFormat = sourceSheet?.data?.[0]?.rowData?.[0]?.values?.[0]?.userEnteredFormat?.numberFormat;
+  if (!numberFormat?.pattern) throw new Error("Date column has no number format to copy.");
+  const rowCount = Math.max(props.gridProperties?.rowCount || 0, 3);
+  const sheetId = props.sheetId;
+  await grequest(client, {
+    url: sheetsUrl(spreadsheetId, ":batchUpdate"),
+    method: "POST",
+    data: {
+      requests: [
+        {
+          insertDimension: {
+            range: {
+              sheetId,
+              dimension: "COLUMNS",
+              startIndex: plan.insertIndex,
+              endIndex: plan.insertIndex + 1,
+            },
+            inheritFromBefore: true,
+          },
+        },
+        {
+          updateCells: {
+            start: { sheetId, rowIndex: 0, columnIndex: plan.insertIndex },
+            rows: [
+              {
+                values: [
+                  {
+                    userEnteredValue: { numberValue: plan.serial },
+                    userEnteredFormat: { numberFormat },
+                  },
+                ],
+              },
+            ],
+            fields: "userEnteredValue,userEnteredFormat.numberFormat",
+          },
+        },
+        {
+          updateCells: {
+            start: { sheetId, rowIndex: 1, columnIndex: plan.insertIndex },
+            rows: [{ values: [{ userEnteredValue: { formulaValue: plan.formula } }] }],
+            fields: "userEnteredValue",
+          },
+        },
+        {
+          copyPaste: {
+            source: {
+              sheetId,
+              startRowIndex: 2,
+              endRowIndex: rowCount,
+              startColumnIndex: plan.sourceIndex,
+              endColumnIndex: plan.sourceIndex + 1,
+            },
+            destination: {
+              sheetId,
+              startRowIndex: 2,
+              endRowIndex: rowCount,
+              startColumnIndex: plan.insertIndex,
+              endColumnIndex: plan.insertIndex + 1,
+            },
+            pasteType: "PASTE_DATA_VALIDATION",
+          },
+        },
+      ],
+    },
+  });
+}
+
+function columnA1(index) {
+  let n = index + 1;
+  let letters = "";
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    letters = String.fromCharCode(65 + rem) + letters;
+    n = Math.floor((n - 1) / 26);
+  }
+  return letters;
+}
+
+/** Header and row-2 formula only. Does not write a student cell. */
+export async function ensureDateColumn(client, spreadsheetId, sheetGid, date) {
+  const layout = await getDateHeader(client, spreadsheetId, sheetGid);
+  const plan = planDateColumn(layout.formatted, layout.formulas, layout.serials, date);
+  if (!plan || plan.op !== "insert") return { plan, inserted: false };
+  await insertDateColumn(client, spreadsheetId, sheetGid, {
+    ...plan,
+    serial: sheetsSerial(date),
+  });
+  return { plan, inserted: true, title: layout.title };
+}
+
+/** Adds one row under the existing table. Does not change the header row. */
+export async function appendSheetRow(client, spreadsheetId, sheetGid, values) {
+  const props = await sheetMeta(client, spreadsheetId, sheetGid);
+  const range = encodeURIComponent(`${quoteTitle(props.title)}!A:ZZ`);
+  await grequest(client, {
+    url: `${sheetsUrl(spreadsheetId, `/values/${range}:append`)}?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
+    method: "POST",
+    data: { values: [values] },
+  });
+  return props.title;
+}
+
+/** Delete whole rows, highest first so earlier indexes stay put. */
+export async function deleteSheetRows(client, spreadsheetId, sheetGid, rowNumbers) {
+  const props = await sheetMeta(client, spreadsheetId, sheetGid);
+  const rows = [...new Set(rowNumbers.map((row) => Number(row)).filter((row) => row > 1))].sort((a, b) => b - a);
+  if (!rows.length) return props.title;
+  await grequest(client, {
+    url: sheetsUrl(spreadsheetId, ":batchUpdate"),
+    method: "POST",
+    data: {
+      requests: rows.map((rowNumber) => ({
+        deleteDimension: {
+          range: {
+            sheetId: props.sheetId,
+            dimension: "ROWS",
+            startIndex: rowNumber - 1,
+            endIndex: rowNumber,
+          },
+        },
+      })),
+    },
+  });
+  return props.title;
+}
+
+/** An empty string still counts in COUNTA on these checkboxes. Clear the cell instead. */
+export async function writeSheetCell(client, spreadsheetId, sheetTitle, a1, value) {
+  if (String(value ?? "") === "") {
+    const range = encodeURIComponent(`${quoteTitle(sheetTitle)}!${a1}`);
+    await grequest(client, {
+      url: `${sheetsUrl(spreadsheetId, `/values/${range}:clear`)}`,
+      method: "POST",
+      data: {},
+    });
+    return;
+  }
+  await writeSheetValues(client, spreadsheetId, sheetTitle, a1, [[value]]);
+}
+
+export async function writeSheetValues(client, spreadsheetId, sheetTitle, a1, values) {
+  const range = encodeURIComponent(`${quoteTitle(sheetTitle)}!${a1}`);
+  await grequest(client, {
+    url: `${sheetsUrl(spreadsheetId, `/values/${range}`)}?valueInputOption=RAW`,
+    method: "PUT",
+    data: { values },
+  });
+}
