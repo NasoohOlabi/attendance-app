@@ -33,6 +33,7 @@ import {
   attendanceStamp,
   attachLogTimes,
   canonicalStudentId,
+  catalogDue,
   clocksFromAppLog,
   clockFromStamp,
   columnLetter,
@@ -226,6 +227,7 @@ function reportSheet(title, rows) {
 }
 
 async function reloadStudents(config) {
+  catalogAt = Date.now();
   const { title, rows } = await getSheetGrid(client, config.spreadsheetId, config.sheetGid);
   reportSheet(title, rows);
   const problem = sheetProblem(rows);
@@ -239,11 +241,26 @@ async function reloadStudents(config) {
   return { merged, rows, title };
 }
 
+/** Search keeps the current list, then rereads the sheet at most once every 10 seconds. */
+function refreshCatalog() {
+  if (!catalogDue(catalogAt, Date.now())) return;
+  if (!client || sheetDenied || !currentConfig) return;
+  catalogAt = Date.now();
+  void reloadStudents(currentConfig).catch((err) => {
+    console.error(err.message);
+    if (isSheetPermissionError(err.message)) {
+      sheetDenied = true;
+      failureNote(currentConfig, err).then((note) => publish({ syncNote: note, error: note }));
+    }
+  });
+}
+
 let scanTimes = { day: "", rows: {} };
 let namedClocks = {};
 let sheetPeople = [];
 let outbox = [];
 let flushTail = Promise.resolve();
+let catalogAt = 0;
 
 function scanTimesPath() {
   return path.join(homedir(), "Masjid", "scan-times.json");
@@ -1389,7 +1406,10 @@ async function createWindow() {
 
 function registerIpc() {
   ipcMain.handle("getState", () => state);
-  ipcMain.handle("filter", (_event, query) => fuzzyStudents(Object.values(cached), query).map(viewStudent));
+  ipcMain.handle("filter", (_event, query) => {
+    refreshCatalog();
+    return fuzzyStudents(Object.values(cached), query).map(viewStudent);
+  });
   ipcMain.handle("assign", async (_event, key) => {
     try {
       await exclusive(() => assignStudent(key));

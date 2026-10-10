@@ -910,6 +910,13 @@ export function fuzzyScore(query, student) {
   return Math.max(scoreText(q, name), id ? scoreText(q, id) : 0);
 }
 
+/** The student search list is reread from the sheet at most this often. */
+export const CATALOG_REFRESH_MS = 10_000;
+
+export function catalogDue(lastAt, now, intervalMs = CATALOG_REFRESH_MS) {
+  return Number(now) - Number(lastAt || 0) >= intervalMs;
+}
+
 export function fuzzyStudents(students, query) {
   const list = Array.isArray(students) ? students : Object.values(students || {});
   return list
