@@ -124,4 +124,4 @@ Symptom: `InitEngine` fails as soon as a capture starts, or the match behavior d
 
 Cause: another `zk4500.exe` already holds the device, or the process is still the copy in `cli\` while the new build is only under `cli\bin\`.
 
-Fix: one owner. `info` takes the device too. Copy the Release output onto `cli\zk4500.exe` before expecting the app to run it. `cwd` for the spawn is the exe’s folder. The form stays minimized and the spawn uses `windowsHide: false`.
+Fix: one owner. `info` takes the device too. Copy the Release output onto `cli\zk4500.exe` before expecting the app to run it. `cwd` for the spawn is the exe’s folder. The form stays off-screen (opacity 0, no taskbar button) and the spawn uses `windowsHide: false`.

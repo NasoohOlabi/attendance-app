@@ -4,7 +4,7 @@ Windows USB fingerprint scanner, ZKTeco ZK4500, `USB\VID_1B55&PID_0840`. One-sho
 
 ## Stack
 
-`ZK4500Cli.cs` hosts `AxZKFPEngX` (ZKFPEngX ActiveX) on a minimized WinForms message pump. `zk4500.csproj` is `net9.0-windows`, `PlatformTarget` x86, `RuntimeIdentifier` win-x86. A normal build is framework-dependent and needs the x86 .NET 9 desktop runtime. `node scripts/scanner-release.mjs` publishes a self-contained, untrimmed win-x86 output into `staging/scanner/`. That folder is gitignored and is what the installer copies.
+`ZK4500Cli.cs` hosts `AxZKFPEngX` (ZKFPEngX ActiveX) on a hidden WinForms message pump. `zk4500.csproj` is `net9.0-windows`, `PlatformTarget` x86, `RuntimeIdentifier` win-x86. A normal build is framework-dependent and needs the x86 .NET 9 desktop runtime. `node scripts/scanner-release.mjs` publishes a self-contained, untrimmed win-x86 output into `staging/scanner/`. That folder is gitignored and is what the installer copies.
 
 The OCX and its USB libraries are the installed Biokey SDK, typically `C:\Program Files (x86)\FPSensor\Biokey\` (`biokey.ocx`, `USB.dll`, `usb_dll.dll`). This directory vendors the interop assemblies:
 
@@ -16,7 +16,7 @@ Stay on ZKFPEngX. Switch to libzkfp only if asked.
 ## Rules
 
 1. One process owns the scanner. A second process that calls `InitEngine` (`info`, `scan`, or `identify`) while another holds the device fails or fights it. `info` takes the device too.
-2. The owner runs in the logged-in user session, STA, with a message pump. This CLI is `[STAThread]` and calls `Application.Run` on a form with `ShowInTaskbar` false and `WindowState` minimized. `BeginCapture()` returns immediately. `OnFingerTouching`, `OnFingerLeaving`, `OnFeatureInfo`, `OnImageReceived`, and `OnCapture` run on that pump. A Windows service (Session 0) cannot host it.
+2. The owner runs in the logged-in user session, STA, with a message pump. This CLI is `[STAThread]` and calls `Application.Run` on a form that stays off-screen: opacity 0, no border, no taskbar or Alt-Tab button. The HWND stays alive. Do not minimize it; with `ShowInTaskbar` false, Windows shows that minimized form on the desktop. `BeginCapture()` returns immediately. `OnFingerTouching`, `OnFingerLeaving`, `OnFeatureInfo`, `OnImageReceived`, and `OnCapture` run on that pump. A Windows service (Session 0) cannot host it.
 3. Today the product is still one-shot: `zk4500.exe scan|identify|info`. Each call starts a process, calls `InitEngine`, and for scan/identify calls `BeginCapture`, arms a timeout (default 20s), prints `key=value` lines, calls `EndEngine`, and exits. Exit code 2 is timeout.
 4. `server-integration/scanner.mjs` uses `execFile` and reads stdout only after the process exits. `finger=detected` and the other live lines reach an HTTP client only then. Timeouts already stack: the CLI deadline, the Node kill timeout (`timeout + 5` seconds), and the browser or host HTTP client. Leave that stack alone.
 5. Use this CLI until the long-running owner in Direction exists.

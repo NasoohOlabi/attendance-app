@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -31,13 +32,8 @@ internal static class ZK4500Cli
         bool deadlineExtended = false;
         DateTime deadline = DateTime.UtcNow;
 
-        using (var form = new Form())
+        using (var form = new ScannerForm())
         {
-            form.Text = "ZK4500 CLI";
-            form.Width = 300;
-            form.Height = 220;
-            form.ShowInTaskbar = false;
-            form.WindowState = FormWindowState.Minimized;
 
             fp = new AxZKFPEngX();
             ((System.ComponentModel.ISupportInitialize)fp).BeginInit();
@@ -170,6 +166,52 @@ internal static class ZK4500Cli
 
         try { if (fp != null) fp.EndEngine(); } catch { }
         return exitCode;
+    }
+
+    private sealed class ScannerForm : Form
+    {
+        const int WS_EX_TOOLWINDOW = 0x80;
+        const int WS_EX_APPWINDOW = 0x40000;
+
+        public ScannerForm()
+        {
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false;
+            StartPosition = FormStartPosition.Manual;
+            Opacity = 0;
+            ClientSize = new Size(300, 220);
+            Location = new Point(-32000, -32000);
+        }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                cp.ExStyle = (cp.ExStyle | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW;
+                return cp;
+            }
+        }
+
+        protected override void OnShown(EventArgs e)
+        {
+            Park();
+            base.OnShown(e);
+        }
+
+        protected override void OnLocationChanged(EventArgs e)
+        {
+            base.OnLocationChanged(e);
+            if (Left > -16000) Park();
+        }
+
+        void Park()
+        {
+            if (IsDisposed) return;
+            if (Opacity != 0) Opacity = 0;
+            if (WindowState != FormWindowState.Normal) WindowState = FormWindowState.Normal;
+            if (Left != -32000 || Top != -32000) Location = new Point(-32000, -32000);
+        }
     }
 
     private static int OpenEngine()
