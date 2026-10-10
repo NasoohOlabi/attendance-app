@@ -158,25 +158,42 @@ header button { -webkit-app-region: no-drag; }
 #ready {
   display: grid;
   grid-template-columns: minmax(240px, 0.9fr) minmax(200px, 0.8fr) minmax(200px, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   column-gap: 32px;
-  align-items: start;
+  align-items: stretch;
   flex: 1;
   min-height: 0;
   overflow: hidden;
 }
+#ready .cue {
+  grid-column: 1;
+  grid-row: 1;
+  min-height: 0;
+  overflow: auto;
+}
 #ready .log {
   grid-column: 2;
-  grid-row: 1 / span 8;
+  grid-row: 1;
+  min-height: 0;
+  overflow: auto;
   margin-top: 0;
 }
 #ready .today {
   grid-column: 3;
-  grid-row: 1 / span 8;
+  grid-row: 1;
   min-width: 0;
+  min-height: 0;
+  overflow: auto;
 }
 @media (max-width: 760px) {
-  #ready { grid-template-columns: 1fr; }
-  #ready .log, #ready .today { grid-column: 1; grid-row: auto; margin-top: 18px; }
+  #ready {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto minmax(0, 1fr);
+  }
+  #ready .cue { grid-column: 1; grid-row: 1; overflow: visible; }
+  #ready .log, #ready .today { grid-column: 1; margin-top: 18px; }
+  #ready .log { grid-row: 2; }
+  #ready .today { grid-row: 3; }
 }
 .hero h1 {
   margin: 0;
@@ -265,7 +282,6 @@ header button { -webkit-app-region: no-drag; }
 .print-add svg { width: 18px; height: 18px; display: block; }
 .print-add:hover { background: var(--green-dark); }
 .print-add:disabled { opacity: 0.6; cursor: default; }
-#ready > .prints { grid-column: 1; }
 .prints:not([hidden]) + #enroll-actions { margin-top: 16px; }
 .card {
   background: var(--card);
@@ -284,8 +300,7 @@ header button { -webkit-app-region: no-drag; }
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 16px;
-  padding: 14px 16px 8px;
-  max-height: calc(100vh - 80px);
+  padding: 14px 16px 16px;
   overflow: auto;
 }
 .today-count {

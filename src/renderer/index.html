@@ -23,6 +23,7 @@
         <button id="settings" class="ghost" type="button" data-i18n="Settings">Settings</button>
       </header>
       <section id="ready" class="hero">
+        <div class="cue">
         <h1 id="headline" data-i18n="Place a finger">Place a finger</h1>
         <p class="detail"><span class="dot"></span><span id="detail" data-i18n="Listening">Listening</span></p>
         <div id="place" class="place" data-cue="wait">
@@ -40,13 +41,6 @@
           </svg>
           <span id="place-label" class="place-label" data-i18n="One moment">One moment</span>
         </div>
-        <ol id="trace" class="log"></ol>
-        <aside id="today" class="today" data-i18n-aria="Here today" aria-label="Here today">
-          <p class="label" data-i18n="Today">Today</p>
-          <p class="today-count" id="today-count"><span dir="ltr">–</span></p>
-          <p id="today-empty" class="today-empty" data-i18n="Loading the sheet">Loading the sheet</p>
-          <ol id="today-list" class="today-list"></ol>
-        </aside>
         <img id="finger-ready" class="finger" data-i18n-alt="Scanned finger" alt="Scanned finger" hidden />
         <div id="prints-ready" class="prints" hidden></div>
         <div id="enroll-actions" class="actions" hidden>
@@ -58,6 +52,14 @@
           <strong id="last-name" dir="auto"></strong>
           <span id="last-meta" dir="ltr"></span>
         </article>
+        </div>
+        <ol id="trace" class="log"></ol>
+        <aside id="today" class="today" data-i18n-aria="Here today" aria-label="Here today">
+          <p class="label" data-i18n="Today">Today</p>
+          <p class="today-count" id="today-count"><span dir="ltr">–</span></p>
+          <p id="today-empty" class="today-empty" data-i18n="Loading the sheet">Loading the sheet</p>
+          <ol id="today-list" class="today-list"></ol>
+        </aside>
       </section>
       <section id="pending" hidden>
         <div class="hero">
