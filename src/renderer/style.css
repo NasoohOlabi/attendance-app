@@ -172,6 +172,7 @@ header button { -webkit-app-region: no-drag; }
 #ready .today {
   grid-column: 3;
   grid-row: 1 / span 8;
+  min-width: 0;
 }
 @media (max-width: 760px) {
   #ready { grid-template-columns: 1fr; }
@@ -311,7 +312,11 @@ header button { -webkit-app-region: no-drag; }
   border-top: 1px solid var(--line);
   line-height: 1.3;
 }
-.today-name { flex: 1; min-width: 0; }
+.today-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: break-word;
+}
 .today-time {
   width: 7.2em;
   flex: none;
