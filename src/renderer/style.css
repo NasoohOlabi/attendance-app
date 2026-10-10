@@ -162,7 +162,7 @@ header button { -webkit-app-region: no-drag; }
   align-items: start;
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
 }
 #ready .log {
   grid-column: 2;
