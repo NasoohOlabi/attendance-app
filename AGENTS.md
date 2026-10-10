@@ -54,7 +54,7 @@ Diagnostic lines for this app go to `~/Masjid/logs/attendance-YYYY-MM-DD.log`. T
 
 Fingerprints tab: same Pages file, `fingerprintSheetGid` in `attendance.config.json`, tab `FingerPrints`. Headers are `student_id`, `fingerprint`, and `created_at`. A saved print appends one row: the Marif id, the template text, and the scan time in the same Damascus stamp as the time log. Several rows can share an id. The scanner still matches local files: `s-{id}.txt`, with spaces in the id turned into hyphens (`s-00-00-000-001.txt`), extras `s-{id}--2.txt`. `zk4500 identify` only loads `*.txt` whose stem starts with `s-` or `t-`. Saving a print writes the local file and appends one sheet row. If that append throws, the local file stays and the detail line says the fingerprint sheet was not written. Startup copies sheet templates that are missing on disk and does not delete local files the sheet lacks.
 
-Prints stay on this computer: `~/Masjid/v1/fingerprints/templates/`. Settings → Delete all fingerprints removes those local files, the pending scan, and the roster. The attendance sheet is left as it is. The next startup copies the fingerprints tab back when that tab can be read. Google Drive is not used.
+Prints stay on this computer: `~/Masjid/v1/fingerprints/templates/`. Settings → Delete all fingerprints removes those local files, the pending scan, the roster, and every data row on the fingerprints tab. The header row stays. The attendance sheet is left as it is. The sheet is cleared before the local files, so a failed sheet write does not wipe the copies that startup would restore. Startup still copies sheet templates that are missing on disk and does not delete local files the sheet lacks. Google Drive is not used.
 
 ## Common bugs
 

@@ -48,8 +48,8 @@ const AR = {
     "تُمسح خلية اليوم، ويُحذف وقت اليوم من السجل. بقية الأيام تبقى.",
   Remove: "إزالة",
   "Delete all fingerprints?": "حذف كل البصمات؟",
-  "Prints on this computer are removed. Templates on the fingerprints sheet come back the next time that sheet can be read. The attendance sheet is not changed.":
-    "تُحذف البصمات من هذا الجهاز. قوالب ورقة البصمات تعود حين يمكن قراءة تلك الورقة. كشف الحضور لا يتغير.",
+  "Prints on this computer and on the fingerprints sheet are removed. The attendance sheet is not changed.":
+    "تُحذف البصمات من هذا الجهاز ومن ورقة البصمات. كشف الحضور لا يتغير.",
   "Delete fingerprints": "احذف البصمات",
   "Close the app and open it again, then undo.": "أغلق التطبيق وافتحه من جديد، ثم تراجع.",
   "Close the app and open it again, then change the time.": "أغلق التطبيق وافتحه من جديد، ثم غيّر الوقت.",
@@ -93,7 +93,8 @@ const AR = {
   "Saving these scans…": "جارٍ حفظ هذه المسحات…",
   "Saving this print…": "جارٍ حفظ هذه البصمة…",
   "Saved on this computer.": "حُفظ على هذا الجهاز.",
-  "All fingerprints deleted on this computer.": "حُذفت كل البصمات من هذا الجهاز.",
+  "All fingerprints deleted.": "حُذفت كل البصمات.",
+  "The fingerprint sheet is not available.": "ورقة البصمات غير متاحة.",
   "The sheet is not available.": "الكشف غير متاح.",
   "Enter a time like 16:55.": "أدخل وقتاً مثل 16:55.",
   "No time log sheet is configured.": "لم يُضبط جدول سجل الوقت.",

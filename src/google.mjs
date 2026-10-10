@@ -225,6 +225,31 @@ export async function appendSheetRow(client, spreadsheetId, sheetGid, values) {
   return props.title;
 }
 
+/** Delete every row under the header in one cut. Row 1 stays. lastRow is the last 1-based row. */
+export async function clearSheetBelowHeader(client, spreadsheetId, sheetGid, lastRow) {
+  const end = Number(lastRow);
+  if (!(end > 1)) return;
+  const props = await sheetMeta(client, spreadsheetId, sheetGid);
+  await grequest(client, {
+    url: sheetsUrl(spreadsheetId, ":batchUpdate"),
+    method: "POST",
+    data: {
+      requests: [
+        {
+          deleteDimension: {
+            range: {
+              sheetId: props.sheetId,
+              dimension: "ROWS",
+              startIndex: 1,
+              endIndex: end,
+            },
+          },
+        },
+      ],
+    },
+  });
+}
+
 /** Delete whole rows, highest first so earlier indexes stay put. */
 export async function deleteSheetRows(client, spreadsheetId, sheetGid, rowNumbers) {
   const props = await sheetMeta(client, spreadsheetId, sheetGid);

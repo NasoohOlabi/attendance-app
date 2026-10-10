@@ -492,7 +492,7 @@ document.querySelector("#clear-prints").addEventListener("click", async () => {
   }
   const accepted = await askConfirm({
     title: "Delete all fingerprints?",
-    detail: "Prints on this computer are removed. Templates on the fingerprints sheet come back the next time that sheet can be read. The attendance sheet is not changed.",
+    detail: "Prints on this computer and on the fingerprints sheet are removed. The attendance sheet is not changed.",
     confirmLabel: "Delete fingerprints",
   });
   if (!accepted) return;

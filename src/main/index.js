@@ -10,6 +10,7 @@ import {
   explainApiFailure,
   isSheetPermissionError,
   appendSheetRow,
+  clearSheetBelowHeader,
   deleteSheetRows,
   ensureDateColumn,
   getDateHeader,
@@ -1357,8 +1358,13 @@ function registerIpc() {
   });
   ipcMain.handle("clearFingerprints", async () => {
     if (!currentConfig?.fingerprintDir) return { ok: false, error: "The app is still starting." };
+    if (!client || sheetDenied || !currentConfig.logSpreadsheetId) {
+      return { ok: false, error: "The fingerprint sheet is not available." };
+    }
     try {
       await exclusive(async () => {
+        const grid = await getSheetGrid(client, currentConfig.logSpreadsheetId, currentConfig.fingerprintSheetGid);
+        await clearSheetBelowHeader(client, currentConfig.logSpreadsheetId, currentConfig.fingerprintSheetGid, grid.rows.length);
         printsEpoch += 1;
         const removed = await clearFingerprints(currentConfig.fingerprintDir);
         pending = null;
@@ -1373,7 +1379,7 @@ function registerIpc() {
         console.log(`cleared fingerprints removed=${removed}`);
         publish({
           phase: "config",
-          detail: "All fingerprints deleted on this computer.",
+          detail: "All fingerprints deleted.",
           error: "",
           lastMatch: null,
           enroll: null,
