@@ -21,6 +21,7 @@ test("the Sheets fixture serves real grid reads and restricts endpoints", async 
 
 test("attendance writes update one value and keep its checkbox validation", async () => {
   const sheets = createSheets();
+  delete sheets.grid("Info").cells.get("2,2").dataValidation;
   await writeAttendanceCell(sheets, "attendance-test", "Info", "C3", "حاضر");
   let grid = sheets.grid("Info");
   assert.equal(grid.rows[2][2], "حاضر");

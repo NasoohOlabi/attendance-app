@@ -6,7 +6,7 @@ import { test, expect } from "./fixtures/app.mjs";
 async function accountFile(root, email = "import-test@example.invalid") {
   const file = path.join(root, "account-import.json");
   const privateKey = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs8", format: "pem" });
-  await writeFile(file, JSON.stringify({ type: "service_account", client_email: email, private_key: privateKey }));
+  await writeFile(file, JSON.stringify({ type: "service_account", client_email: email, private_key: privateKey, token_uri: "https://untrusted.example.invalid/token", universe_domain: "example.invalid" }));
   return { file, privateKey };
 }
 
@@ -34,12 +34,18 @@ test("service account import uses Windows encryption and survives restart withou
   const encryptedFile = path.join(app.home, "Masjid/v1/config/service-account.enc");
   await expect(app.page.locator("#account-location")).toHaveText(encryptedFile);
   const bytes = await readFile(encryptedFile);
+  const savedFields = await app.electron.evaluate(async ({ safeStorage }, encoded) => {
+    const decrypted = await safeStorage.decryptStringAsync(Buffer.from(encoded, "base64"));
+    return Object.keys(JSON.parse(decrypted.result)).sort();
+  }, bytes.toString("base64"));
+  expect(savedFields).toEqual(["client_email", "private_key", "type"]);
   expect(bytes.includes(Buffer.from(imported.privateKey))).toBe(false);
   expect(bytes.includes(Buffer.from("import-test@example.invalid"))).toBe(false);
   const config = JSON.parse(await readFile(app.configPath, "utf8"));
   expect(config.serviceAccountJson).toBe("");
   expect(JSON.stringify(await app.state())).not.toContain("private_key");
   expect(JSON.stringify(await app.state())).not.toContain(imported.privateKey);
+  expect(await readFile(imported.file, "utf8")).toContain(imported.privateKey.split("\n")[1]);
   await rm(imported.file);
   await app.restart();
   await app.ready();
@@ -70,6 +76,11 @@ test("cancelled and invalid imports preserve the encrypted account", async ({ ap
   await expect(app.page.locator("#error")).toHaveText("Choose a valid Google service-account JSON file with its private key.");
   expect(await readFile(encryptedFile)).toEqual(before);
   expect(JSON.stringify(await app.state())).not.toContain("secret-text-that-must-not-be-displayed");
+  await writeFile(imported.file, JSON.stringify({ type: "service_account", client_email: "wrong@example.invalid", private_key: "not-an-RSA-key" }));
+  await app.page.locator("#import-account").click();
+  await expect(app.page.locator("#error")).toHaveText("Choose a valid Google service-account JSON file with its private key.");
+  expect(await readFile(encryptedFile)).toEqual(before);
+  await expect(app.page.locator("#account-email")).toHaveText("import-test@example.invalid");
   await writeFile(encryptedFile, "damaged ciphertext");
   await app.restart();
   await accountPage(app);

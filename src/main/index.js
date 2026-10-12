@@ -758,7 +758,8 @@ async function restorePending(config, gen) {
     }
     return;
   }
-  pending = null;
+  pending = { capturedAt: index.pending?.capturedAt || new Date().toISOString() };
+  publish({ phase: "pending", headline: "New fingerprint", detail: "Choose who this print belongs to.", canCloseSettings: true, enroll: null }, gen);
 }
 
 function scanImageUrl() {

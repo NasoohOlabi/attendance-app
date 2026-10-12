@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, readFile, writeFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createSheets } from "./sheets.mjs";
 
@@ -11,6 +12,7 @@ const require = createRequire(import.meta.url);
 const electronPath = require("electron");
 const repo = fileURLToPath(new URL("../../..", import.meta.url));
 const scannerExe = path.join(repo, "node_modules/.cache/attendance-test-scanner/zk4500-fake.exe");
+const sourceCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();
 
 async function jsonBody(request) {
   let body = "";
@@ -72,6 +74,7 @@ export const test = base.extend({
             }
             send(response, await sheets.request(options));
           } catch (error) {
+            if (/^(Unknown|Unsupported|Invalid range)/.test(error.message)) runtimeErrors.push(error.message);
             send(response, { error: { message: error.message, status: error.response?.status, data: error.response?.data } });
           }
         } else if (request.url === "/scanner/next") {
@@ -196,21 +199,27 @@ export const test = base.extend({
         await page.screenshot({ path: screenshot }).catch(() => {});
         await testInfo.attach("window", { path: screenshot, contentType: "image/png" }).catch(() => {});
       }
-      await stop();
-      server.closeAllConnections();
-      await new Promise((resolve) => server.close(resolve));
+      let shutdownError;
+      try { await stop(); } catch (error) { shutdownError = error; }
+      finally {
+        server.closeAllConnections();
+        await new Promise((resolve) => server.close(resolve));
+      }
       const disk = {};
-      for (const file of ["home/Masjid/attendance-outbox.json", "home/Masjid/scan-times.json", "home/Masjid/v1/fingerprints/index.json", "home/Masjid/logs/attendance-2026-10-12.log"]) {
+      const logNames = await readdir(path.join(home, "Masjid/logs")).catch((error) => { if (error.code === "ENOENT") return []; throw error; });
+      for (const file of ["home/Masjid/attendance-outbox.json", "home/Masjid/scan-times.json", "home/Masjid/v1/fingerprints/index.json", ...logNames.map((name) => `home/Masjid/logs/${name}`)]) {
         try { disk[file] = await readFile(path.join(root, file), "utf8"); }
         catch (error) { if (error.code !== "ENOENT") throw error; }
       }
-      const receipts = { root, config, captures, requests: sheets.requests, grids: sheets.grids, disk, runtimeErrors, transcript };
+      const receipts = { sourceCommit, versions: { node: process.version, electron: require("electron/package.json").version, playwright: require("@playwright/test/package.json").version }, root, config, captures, requests: sheets.requests, grids: sheets.grids, disk, runtimeErrors, transcript, shutdownError: shutdownError?.message };
       const receiptPath = testInfo.outputPath("receipts.json");
       await writeFile(receiptPath, JSON.stringify(receipts, (_key, value) => value instanceof Map ? Object.fromEntries(value) : value, 2));
       await testInfo.attach("receipts", { path: receiptPath, contentType: "application/json" });
       await testInfo.attach("test-root", { body: Buffer.from(root), contentType: "text/plain" });
+      if (shutdownError) throw shutdownError;
       expect(runtimeErrors, "Unexpected runtime or fixture errors").toEqual([]);
       expect(transcript.join(""), "Unexpected external request").not.toContain("E2E blocked external request");
+      expect(transcript.join(""), "Unexpected application failure").not.toMatch(/uncaught exception|unhandled rejection|renderer gone|window failed to load/i);
     }
   },
 });

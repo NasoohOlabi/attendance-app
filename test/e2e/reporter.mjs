@@ -7,6 +7,7 @@ export default class E2EReporter {
   failures = [];
   tests = [];
   fullRun = false;
+  completed = 0;
 
   onBegin(config, suite) {
     this.fullRun = process.env.ATTENDANCE_E2E_FULL === "1";
@@ -14,6 +15,7 @@ export default class E2EReporter {
   }
 
   onTestEnd(test, result) {
+    this.completed += 1;
     if (result.status === "skipped") this.failures.push(`Skipped: ${test.titlePath().join(" › ")}`);
     if (result.status === "passed" && result.retry > 0) this.failures.push(`Flaky: ${test.titlePath().join(" › ")}`);
     if (result.status !== "passed" && result.status !== "skipped") this.failures.push(`${result.status}: ${test.titlePath().join(" › ")}`);
@@ -22,6 +24,7 @@ export default class E2EReporter {
   onEnd() {
     if (this.tests.length === 0) this.failures.push("No E2E tests were discovered.");
     if (this.fullRun) {
+      if (this.completed !== this.tests.length) this.failures.push("The full E2E run did not execute every discovered case.");
       let expected;
       try {
         expected = JSON.parse(readFileSync(coveragePath, "utf8"));
