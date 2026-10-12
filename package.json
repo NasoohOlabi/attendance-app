@@ -24,6 +24,7 @@
     "google-auth-library": "^10.3.0"
   },
   "devDependencies": {
+    "@electron/asar": "3.4.1",
     "@playwright/test": "1.64.0",
     "electron": "44.7.0",
     "electron-builder": "26.15.3",
@@ -40,7 +41,8 @@
     "directories": {
       "output": "release"
     },
-    "files": ["out/**", "package.json"],
+    "files": ["out/**", "package.json", "LICENSE"],
+    "afterPack": "scripts/verify-package.cjs",
     "asar": true,
     "extraResources": [
       {
