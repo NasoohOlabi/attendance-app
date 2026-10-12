@@ -90,8 +90,13 @@
       <section id="config" hidden>
         <div class="hero">
           <h1 data-i18n="Settings">Settings</h1>
-          <p class="detail" id="config-detail" data-i18n="Service account path, spreadsheet, gid, and scanner.">Service account path, spreadsheet, gid, and scanner.</p>
+          <p class="detail" id="config-detail" data-i18n="Google account, spreadsheet, gid, and scanner.">Google account, spreadsheet, gid, and scanner.</p>
         </div>
+        <nav class="settings-tabs" role="tablist" aria-label="Settings">
+          <button id="settings-general-tab" class="secondary" type="button" role="tab" aria-controls="settings-general" aria-selected="true" data-settings-page="general" data-i18n="General">General</button>
+          <button id="settings-account-tab" class="secondary" type="button" role="tab" aria-controls="settings-account" aria-selected="false" data-settings-page="account" data-i18n="Service account">Service account</button>
+        </nav>
+        <div id="settings-general" class="settings-page" role="tabpanel" aria-labelledby="settings-general-tab">
         <div class="field">
           <span id="language-label" data-i18n="Language">Language</span>
           <div class="lang" role="group" dir="ltr" aria-labelledby="language-label">
@@ -108,12 +113,6 @@
             <button class="secondary" type="button" data-font="naskh" aria-pressed="false">Noto Naskh Arabic</button>
           </div>
         </div>
-        <label class="field"><span data-i18n="Service account JSON">Service account JSON</span>
-          <span class="file-row">
-            <input id="cfg-key" type="text" dir="ltr" />
-            <button class="secondary browse" type="button" data-pick="json" data-target="cfg-key" data-i18n="Browse">Browse</button>
-          </span>
-        </label>
         <label class="field"><span data-i18n="Spreadsheet id">Spreadsheet id</span>
           <input id="cfg-sheet" type="text" dir="ltr" />
         </label>
@@ -128,6 +127,18 @@
         </label>
         <p class="detail"><span data-i18n="Prints are stored in">Prints are stored in</span> <span id="cfg-dir" dir="ltr"></span></p>
         <button id="clear-prints" class="danger" type="button" data-i18n="Delete all fingerprints">Delete all fingerprints</button>
+        </div>
+        <div id="settings-account" class="settings-page" role="tabpanel" aria-labelledby="settings-account-tab" hidden>
+          <div class="account-card">
+            <h2 data-i18n="Import a service account">Import a service account</h2>
+            <p class="detail" data-i18n="Choose the JSON key downloaded from Google Cloud. It will be encrypted for this Windows user.">Choose the JSON key downloaded from Google Cloud. It will be encrypted for this Windows user.</p>
+            <p id="account-status" role="status"></p>
+            <p id="account-email" dir="ltr" hidden></p>
+            <button id="import-account" class="primary" type="button" data-i18n="Import JSON">Import JSON</button>
+            <p class="detail" data-i18n="The original file is not deleted. Share your sheets as Editor with the account email.">The original file is not deleted. Share your sheets as Editor with the account email.</p>
+            <p class="detail"><span data-i18n="Encrypted account location">Encrypted account location</span><br /><span id="account-location" dir="ltr"></span></p>
+          </div>
+        </div>
         <div class="actions">
           <button id="save" class="primary" type="button" data-i18n="Save">Save</button>
           <button id="cancel" class="secondary" type="button" data-i18n="Cancel">Cancel</button>

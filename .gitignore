@@ -18,6 +18,8 @@ obj/
 !/attendance.config.example.json
 *.log
 fingerprints/
+service-account.enc
+service-account.enc.*.tmp
 service-account*.json
 *-service-account*.json
 /index.html

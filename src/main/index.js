@@ -2,7 +2,8 @@ import { access, copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, writeF
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol } from "electron";
+import { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, safeStorage } from "electron";
+import { createCredentialStore, credentialFile } from "../credentials.mjs";
 import { legacyUserDataPath, loadConfig, scannerExeInResources } from "../config.mjs";
 import { appLogFile, startAppLog } from "../log.mjs";
 import {
@@ -140,9 +141,31 @@ function publish(patch, gen) {
   if (win && !win.isDestroyed()) win.webContents.send("state", state);
 }
 
+let accountStore = null;
+let serviceAccount = { status: "missing", email: "", file: "" };
+
+function credentialStore(config) {
+  const file = credentialFile(config.fingerprintDir);
+  if (!accountStore || accountStore.file !== file) accountStore = createCredentialStore({ file, encryption: safeStorage });
+  return accountStore;
+}
+
+async function refreshServiceAccount(config) {
+  const file = credentialStore(config).file;
+  try {
+    const credentials = await credentialStore(config).read();
+    serviceAccount = credentials
+      ? { status: "imported", email: credentials.client_email, file }
+      : { status: config.serviceAccountJson ? "external" : "missing", email: await accountEmail(config), file };
+  } catch (error) {
+    serviceAccount = { status: "locked", email: "", file, error: error.message };
+  }
+}
+
 function publicConfig(config) {
   return {
     serviceAccountJson: config.serviceAccountJson || "",
+    serviceAccount,
     spreadsheetId: config.spreadsheetId || "",
     sheetGid: config.sheetGid,
     zk4500Cli: config.zk4500Cli || "",
@@ -154,6 +177,8 @@ function publicConfig(config) {
 
 async function accountEmail(config) {
   try {
+    const credentials = await credentialStore(config).read();
+    if (credentials) return credentials.client_email;
     const parsed = JSON.parse(await readFile(config.serviceAccountJson, "utf8"));
     return parsed.client_email || "";
   } catch {
@@ -987,7 +1012,7 @@ async function prepareGoogle(config, gen) {
   sheetDenied = false;
   sheetReported = false;
   try {
-    client = await createGoogle(config);
+    client = await createGoogle(config, await credentialStore(config).read());
   } catch (err) {
     client = null;
     publish({ error: err.message }, gen);
@@ -1092,6 +1117,7 @@ async function startLoop() {
     return;
   }
   currentConfig = config;
+  await refreshServiceAccount(config);
   await ensureRoster(config);
   publish({
     phase: "ready",
@@ -1498,7 +1524,7 @@ function registerIpc() {
     publish({
       phase: "config",
       headline: "Setup",
-      detail: "Service account path, spreadsheet, gid, and scanner.",
+      detail: "Google account, spreadsheet, gid, and scanner.",
       error: "",
       canCloseSettings: true,
     });
@@ -1524,18 +1550,32 @@ function registerIpc() {
       error: "",
     });
   });
+  ipcMain.handle("importServiceAccount", async (event) => {
+    if (!win || event.sender !== win.webContents) return { ok: false, error: "Open Settings to import the account." };
+    try {
+      const picked = await dialog.showOpenDialog(win, { properties: ["openFile"], filters: [{ name: "Service account JSON", extensions: ["json"] }] });
+      if (picked.canceled || !picked.filePaths[0]) return { ok: false, canceled: true };
+      return await exclusive(async () => {
+        const config = loadConfig(configOptions());
+        const imported = await credentialStore(config).importFile(picked.filePaths[0]);
+        await writeConfigFile(config, { serviceAccountJson: "" });
+        currentConfig = loadConfig(configOptions());
+        await refreshServiceAccount(currentConfig);
+        await prepareGoogle(currentConfig, generation);
+        publish({ config: publicConfig(currentConfig) });
+        return { ok: true, email: imported.email };
+      });
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  });
   ipcMain.handle("saveConfig", async (_event, input) => {
     try {
       const prev = loadConfig(configOptions());
-      const serviceAccountJson = String(input?.serviceAccountJson || "").trim();
-      if (serviceAccountJson.startsWith("{") || serviceAccountJson.includes("private_key")) {
-        throw new Error("Service account must be a file path, not the key itself.");
-      }
       const gidText = String(input?.sheetGid ?? "").trim();
       const sheetGid = gidText ? Number(gidText) : prev.sheetGid;
       if (!Number.isInteger(sheetGid) || sheetGid < 0) throw new Error("Sheet gid must be a number.");
       await writeConfigFile(prev, {
-        serviceAccountJson,
         spreadsheetId: String(input?.spreadsheetId || "").trim(),
         sheetGid,
         zk4500Cli: String(input?.zk4500Cli || "").trim() || prev.zk4500Cli,

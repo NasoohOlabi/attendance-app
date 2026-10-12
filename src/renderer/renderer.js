@@ -199,12 +199,40 @@ async function choose(key) {
 
 function fillConfig(state) {
   const cfg = state.config || {};
-  document.querySelector("#cfg-key").value = cfg.serviceAccountJson || "";
   document.querySelector("#cfg-sheet").value = cfg.spreadsheetId || "";
   document.querySelector("#cfg-gid").value = cfg.sheetGid ?? "";
   document.querySelector("#cfg-exe").value = cfg.zk4500Cli || "";
   document.querySelector("#cfg-dir").textContent = state.fingerprintDir || cfg.fingerprintDir || "";
   cancel.hidden = !state.canCloseSettings;
+  chooseSettingsPage("general");
+}
+
+function chooseSettingsPage(page) {
+  document.querySelector("#settings-general").hidden = page !== "general";
+  document.querySelector("#settings-account").hidden = page !== "account";
+  document.querySelector("#save").hidden = page !== "general";
+  for (const tab of document.querySelectorAll("[data-settings-page]")) {
+    tab.setAttribute("aria-selected", String(tab.dataset.settingsPage === page));
+  }
+}
+
+let importingAccount = false;
+function renderServiceAccount(state) {
+  const account = state.config?.serviceAccount || { status: "missing" };
+  const messages = {
+    missing: "No service account imported.",
+    external: "An external key is configured. Import it to store an encrypted copy.",
+    imported: "Service account imported and encrypted.",
+    locked: "The saved account cannot be opened. Import it again for this Windows user.",
+  };
+  document.querySelector("#account-status").textContent = translate(importingAccount ? "Importing account…" : messages[account.status] || messages.missing);
+  const email = document.querySelector("#account-email");
+  email.textContent = account.email || "";
+  email.hidden = !account.email;
+  document.querySelector("#account-location").textContent = account.file || "";
+  const button = document.querySelector("#import-account");
+  button.disabled = importingAccount;
+  button.textContent = translate(account.status === "imported" ? "Replace account" : "Import JSON");
 }
 
 const ICONS = {
@@ -414,6 +442,7 @@ function renderProfile(fields) {
 
 function render(state) {
   lastState = state;
+  renderServiceAccount(state);
   const mode = screenForPhase(state.phase);
   const enteredPicker = mode === "pending" && !picker;
   const enteredConfig = mode === "config" && !configOpen;
@@ -562,7 +591,6 @@ document.querySelector("#save").addEventListener("click", async () => {
   const save = document.querySelector("#save");
   save.disabled = true;
   const result = await window.attendance.saveConfig({
-    serviceAccountJson: document.querySelector("#cfg-key").value,
     spreadsheetId: document.querySelector("#cfg-sheet").value,
     sheetGid: document.querySelector("#cfg-gid").value,
     zk4500Cli: document.querySelector("#cfg-exe").value,
@@ -571,6 +599,28 @@ document.querySelector("#save").addEventListener("click", async () => {
   if (!result?.ok && result?.error) {
     error.hidden = false;
     error.textContent = translate(result.error);
+  }
+});
+for (const tab of document.querySelectorAll("[data-settings-page]")) {
+  tab.addEventListener("click", () => chooseSettingsPage(tab.dataset.settingsPage));
+}
+document.querySelector("#import-account").addEventListener("click", async () => {
+  importingAccount = true;
+  renderServiceAccount(lastState || {});
+  try {
+    const result = await window.attendance.importServiceAccount();
+    if (!result?.ok && !result?.canceled) {
+      error.hidden = false;
+      error.textContent = translate(result?.error || "The account could not be imported.");
+    } else if (result?.ok) {
+      error.hidden = true;
+    }
+  } catch {
+    error.hidden = false;
+    error.textContent = translate("The account could not be imported.");
+  } finally {
+    importingAccount = false;
+    renderServiceAccount(lastState || {});
   }
 });
 for (const button of document.querySelectorAll("[data-pick]")) {

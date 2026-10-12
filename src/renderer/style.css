@@ -656,6 +656,13 @@ input[type="text"], input[type="search"] {
   border-color: var(--green);
 }
 .field { display: block; }
+.settings-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+.settings-tabs [aria-selected="true"] { background: #ded6cb; color: #221e19; }
+.settings-page { display: flex; flex-direction: column; gap: 12px; }
+.account-card { padding: 18px; border: 1px solid #d8d0c5; border-radius: 12px; background: rgba(255,255,255,.4); }
+.account-card h2 { margin: 0 0 8px; font-size: 20px; }
+.account-card .primary { margin-block: 12px; }
+#account-email, #account-location { overflow-wrap: anywhere; unicode-bidi: plaintext; }
 .field > span:first-child:not(.file-row) { display: block; }
 .file-row {
   display: flex;
