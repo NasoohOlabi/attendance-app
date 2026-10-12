@@ -1,5 +1,5 @@
 {
-  "_note": "Copy to attendance.config.json. serviceAccountJson is a path to a key file, not the key. Leave a field empty when you do not have a value yet.",
+  "_note": "Copy to attendance.config.json. Import a key in Settings > Service account to store it encrypted beside fingerprints. serviceAccountJson is only for a legacy external key-file path, never the key itself. Leave a field empty when you do not have a value yet.",
   "serviceAccountJson": "",
   "spreadsheetId": "",
   "sheetGid": null,

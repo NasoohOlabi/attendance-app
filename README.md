@@ -15,9 +15,10 @@ Use Windows, Node.js 22.12 or later, Bun 1.4, and the .NET 9 SDK for the scanner
    Copy-Item attendance.config.example.json attendance.config.json
    ```
 
-3. Edit `attendance.config.json`. Set `serviceAccountJson` to your local Google service-account key file. Set the roster `spreadsheetId`/`sheetGid`, the log `logSpreadsheetId`/`logSheetGid`, and `fingerprintSheetGid`. Set `zk4500Cli` to `staging/scanner/zk4500.exe`.
+3. Edit `attendance.config.json`. Set the roster `spreadsheetId`/`sheetGid`, the log `logSpreadsheetId`/`logSheetGid`, and `fingerprintSheetGid`. Set `zk4500Cli` to `staging/scanner/zk4500.exe`. Leave `serviceAccountJson` empty for secure import.
 4. Enable the Google Sheets API for your Google project and share both spreadsheets as Editor with the email in your service-account key.
 5. Run `bun start`.
+6. Open Settings → Service account → Import JSON and choose your Google service-account file.
 
 Never commit credentials, real roster data, fingerprint templates, or your local configuration. The example contains no operational identifiers.
 
@@ -31,7 +32,13 @@ The sheet GID is the numeric `gid` in a tab's URL. The spreadsheet ID is the ide
 
 ## Run the installed app
 
-Open Settings to choose your private key file and roster settings. Advanced log/fingerprint settings can be supplied in `%APPDATA%\attendance-service\attendance.config.json`. That legacy profile name is retained so upgrades keep existing settings and renderer preferences. The display name remains Masjid Attendance.
+Open Settings → Service account → Import JSON to import or replace your Google account. Set the roster fields on the General page. Advanced log/fingerprint settings can be supplied in `%APPDATA%\attendance-service\attendance.config.json`. That legacy profile name is retained so upgrades keep existing settings and renderer preferences. The display name remains Masjid Attendance.
+
+The imported account is encrypted under `~/Masjid/v1/config/service-account.enc`, beside the fingerprint store. Electron's asynchronous safeStorage API uses Windows DPAPI to protect the encryption key for your Windows account. There is no separate plaintext encryption-key file. The decrypted key stays in the main process and is not sent to the page or written to a temporary plaintext file. The original downloaded JSON is left untouched.
+
+This protects stored data from other Windows users; it does not protect against malware running as you. Moving the encrypted file to another Windows account can make it unreadable; import the original account there instead. If secure Windows storage is unavailable, importing fails rather than saving plaintext. Existing external key paths keep working until you import an encrypted copy.
+
+See [Electron safeStorage security semantics](https://www.electronjs.org/docs/latest/api/safe-storage). If an old installer exposed your key, revoke/replace it first; encrypting an exposed key does not invalidate its old copies.
 
 Templates live under `~/Masjid/v1/fingerprints/templates/`; logs under `~/Masjid/logs/`; queued attendance under `~/Masjid/attendance-outbox.json`. Settings → Delete all fingerprints clears local prints and fingerprint sheet rows. It leaves the attendance sheet unchanged.
 

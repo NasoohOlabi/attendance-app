@@ -15,6 +15,7 @@ Architecture and acceptance checks: [plans/public-release.md](plans/public-relea
 - [ ] V2: Verify clean installation, physical scanner capture/matching, reinstall/upgrade, data retention, and uninstall on the supported Windows target.
 - [x] R1: Add README, MIT license, packaging guard and repeatable publication-history filtering/checks. Refresh the audit and verify the final public copy. Do not push without an explicit request.
 - [ ] SEC1: Replace the service-account key potentially exposed in old installers, update private configuration, and revoke the old key. Old release artifacts are quarantined; this is a confirmed packaging bug, not evidence of unauthorized access.
+- [x] SEC2: Import or replace the service account from its Settings page; store ciphertext beside fingerprints with Windows DPAPI protection. Validate imports, keep secrets out of renderer/config/logs, and verify restart and failure handling.
 
 - Today list, undo, scan-time fallback, in-app confirm, cream title bar — done
 - Save several scans to one student at once — done

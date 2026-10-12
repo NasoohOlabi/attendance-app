@@ -1,6 +1,6 @@
 # Masjid attendance
 
-Local Windows app for the mosque sheet. A finger on the ZK4500 marks the student حاضر. Read this before changing the scanner, the sheet, or the window. Spreadsheet ids, gids, and the service-account path live in gitignored `attendance.config.json`, not in source.
+Local Windows app for the mosque sheet. A finger on the ZK4500 marks the student حاضر. Read this before changing the scanner, the sheet, or the window. Spreadsheet ids and gids live in gitignored `attendance.config.json`, not in source. Settings → Service account imports a Google JSON key into `~/Masjid/v1/config/service-account.enc`, beside the fingerprint folder. `src/credentials.mjs` uses Electron's asynchronous safeStorage API and Windows DPAPI; no separate plaintext encryption key or temporary plaintext account copy is stored. Only account status/email/location reach the renderer. Legacy service-account file paths still work until an account is imported; then the encrypted account takes precedence.
 
 Scanner source lives in `scanner/`. `node scripts/scanner-release.mjs` publishes the self-contained exe into `staging/scanner/`, and dev launches the path in `zk4500Cli`. `scanner/AGENTS.md` is the capture and match contract. This file is the host app and the bugs that showed up while wiring the two together. The installer copies that staged folder to `resources/scanner/`. The packaged app runs that copy.
 

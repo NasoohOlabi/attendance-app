@@ -29,3 +29,9 @@ Only the verified filtered source copy is intended for GitHub publication. Local
 The self-contained scanner still targets net9.0-windows and does not install the USB driver or Biokey ActiveX control. The complete driver-installing setup, supported-runtime migration and clean-machine/hardware checks remain release work. No new setup installer was shipped by this task.
 
 The package remains attendance-app, display name Masjid Attendance, app identity com.masjid.attendance, and legacy attendance-service user profile. No credentials, private configuration or live scanner lifecycle were changed. Nothing was pushed.
+
+## Encrypted account import
+
+Settings now has a Service account page. Imported Google JSON is validated and stored as ciphertext in ~/Masjid/v1/config/service-account.enc. Electron asynchronous safeStorage uses Windows DPAPI; decrypted credentials stay in the main process and GoogleAuth receives them in memory. No separate plaintext encryption key is stored, and imported authentication endpoints are ignored. Invalid imports preserve the previous encrypted account. Missing secure storage fails closed.
+
+Real Windows tests verify import, ciphertext, restart without the original file, cancellation, invalid-file rejection, damaged-ciphertext handling and Arabic UI. The downloaded JSON is not deleted. Other applications running as the same Windows user are outside DPAPI's protection. The previously exposed account still requires key rotation; no real account was imported or rotated by these tests. Regenerate the public source copy after these commits if publishing the updated feature.
