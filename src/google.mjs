@@ -34,7 +34,10 @@ export function isOfflineError(message) {
   );
 }
 
-export async function createGoogle(config) {
+export async function createGoogle(config, credentials = null) {
+  if (credentials) {
+    return new GoogleAuth({ credentials, scopes: SCOPES }).getClient();
+  }
   const keyFile = config.serviceAccountJson;
   if (!keyFile) {
     throw new Error(
@@ -45,8 +48,8 @@ export async function createGoogle(config) {
   let parsed;
   try {
     parsed = JSON.parse(await readFile(keyFile, "utf8"));
-  } catch (err) {
-    throw new Error(`Cannot read service account JSON at ${keyFile}: ${err.message}`);
+  } catch {
+    throw new Error(`Cannot read service account JSON at ${keyFile}. Check the file and permissions.`);
   }
   if (!parsed.client_email || !parsed.private_key) {
     throw new Error(`Service account JSON at ${keyFile} is missing client_email or private_key.`);
