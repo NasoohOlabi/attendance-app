@@ -8,6 +8,16 @@ Scanner source lives in `scanner/`. `node scripts/scanner-release.mjs` publishes
 
 At the end of every user prompt, commit the work from that prompt. When a prompt produced more than one independent change, keep the commits small and atomic. Do not commit secrets (service-account JSON, `attendance.config.json`, private keys). Do not push unless the user asked. `bun run release` bumps the version, commits that version on the current code, then builds the installer from that commit. Do not ship an installer whose version commit is behind the code.
 
+## Security before committing or pushing
+
+Run `bun run setup:hooks` in each working or publication clone. It installs the tracked pre-push hook locally and refuses to replace another hooks directory. Never bypass it with `--no-verify`, disable it, or push with `--mirror`. Only publish explicit branches or tags after the user requests a push.
+
+Before committing, run `bun run lint` and review the staged diff privately. The lint checks staged and working copies of tracked files. Never force-add ignored credentials, encrypted accounts, local configuration, fingerprint templates, installers, or vendor SDK binaries. Do not print secret values into terminals, reports, commit messages, or CI logs. The signature scan is a guard, not proof that arbitrary passwords or personal data are absent; review new files too.
+
+Before pushing, scan the entire ancestry of each outgoing ref with `node scripts/security-lint.mjs --history <ref>`, run `bun audit`, and run the tests appropriate to the change. The hook scans the exact outgoing commit histories and messages, including deleted files. CI runs the same history check. Do not weaken a failing rule to make a push pass.
+
+The original working history contains vendor DLLs. Publish from a new filtered clone made by `scripts/prepare-publication.ps1`, install its hook, and inspect its refs and remote before pushing. Do not add a remote to the original repository to bypass this process. Preserve the installer allowlist and `scripts/verify-package.cjs`; run the package verification before distributing an installer. Never upload quarantined installers. If a real credential was exposed, revoke or rotate it with its owner; deleting it from Git or encrypting the replacement does not revoke it.
+
 ## Stack
 
 Node ESM, Bun, electron-vite (Vite 6), Electron 44, vanilla renderer (no React). `bun start` serves the renderer at `http://localhost:5173/` and opens the window. Tests: `bun test` (`node --test test/core.test.mjs`).

@@ -13,6 +13,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -23,6 +25,9 @@ jobs:
         with:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run lint:history
+      - run: bun audit
       - run: node node_modules/electron/install.js
       - run: bun run test
       - run: bun run test:e2e

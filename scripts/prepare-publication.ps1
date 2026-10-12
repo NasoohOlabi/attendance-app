@@ -62,6 +62,10 @@ try {
     $remotes = @(Invoke-Git -Repo $publicationRepo -GitArgs @('remote'))
     if ($remotes.Count) { throw 'The publication copy unexpectedly retains a remote.' }
     $null = Invoke-Git -Repo $publicationRepo -GitArgs @('fsck', '--no-reflogs')
+    & node scripts/security-lint.mjs --history HEAD
+    if ($LASTEXITCODE -ne 0) { throw 'Security lint failed. Do not publish this copy.' }
+    & node scripts/install-hooks.mjs
+    if ($LASTEXITCODE -ne 0) { throw 'Security hook installation failed.' }
     Write-Output "Prepared $publicationRepo from $sourceCommit. Only $Branch is included; interop DLL history is removed. No remote or push was created."
 }
 finally {
