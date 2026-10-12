@@ -6,7 +6,7 @@ Windows USB fingerprint scanner, ZKTeco ZK4500, `USB\VID_1B55&PID_0840`. One-sho
 
 `ZK4500Cli.cs` hosts `AxZKFPEngX` (ZKFPEngX ActiveX) on a hidden WinForms message pump. `zk4500.csproj` is `net9.0-windows`, `PlatformTarget` x86, `RuntimeIdentifier` win-x86. A normal build is framework-dependent and needs the x86 .NET 9 desktop runtime. `node scripts/scanner-release.mjs` publishes a self-contained, untrimmed win-x86 output into `staging/scanner/`. That folder is gitignored and is what the installer copies.
 
-The OCX and its USB libraries are the installed Biokey SDK, typically `C:\Program Files (x86)\FPSensor\Biokey\` (`biokey.ocx`, `USB.dll`, `usb_dll.dll`). This directory vendors the interop assemblies:
+The OCX and its USB libraries are the installed Biokey SDK, typically `C:\Program Files (x86)\FPSensor\Biokey\` (`biokey.ocx`, `USB.dll`, `usb_dll.dll`). Developers supply these interop assemblies locally from authorized SDK/tooling. They are gitignored because redistribution rights have not been established:
 
 - `AxInterop.ZKFPEngXControl.dll`
 - `Interop.ZKFPEngXControl.dll`

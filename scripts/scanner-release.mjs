@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,6 +22,13 @@ const publishArgs = [
   "-o",
   out,
 ];
+
+for (const name of ["AxInterop.ZKFPEngXControl.dll", "Interop.ZKFPEngXControl.dll"]) {
+  if (!existsSync(path.join(root, "scanner", name))) {
+    console.error(`Missing scanner/${name}. Supply the interop wrappers from authorized SDK/tooling; see README.md. Existing staged output was preserved.`);
+    process.exit(1);
+  }
+}
 
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });

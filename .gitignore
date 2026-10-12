@@ -4,6 +4,8 @@ staging/
 scanner/bin/
 scanner/obj/
 scanner/captures/
+scanner/AxInterop.ZKFPEngXControl.dll
+scanner/Interop.ZKFPEngXControl.dll
 data/
 out/
 release/
