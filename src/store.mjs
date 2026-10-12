@@ -677,42 +677,42 @@ function queuedPerson(person, kind) {
 }
 
 /** One present mark per student per day. A waiting undo for that day is dropped. */
-export function queuePresent(items, person) {
+export function queuePresent(items, person, active = null) {
   const list = items || [];
   const day = outboxDay(person.at);
   if (!attendanceKey(person) || !day) return list;
-  const rest = list.filter((item) => !(item.kind === "absent" && sameAttendance(item, person) && outboxDay(item.at) === day));
+  const rest = list.filter((item) => item === active || !(item.kind === "absent" && sameAttendance(item, person) && outboxDay(item.at) === day));
   if (rest.some((item) => item.kind === "present" && sameAttendance(item, person) && outboxDay(item.at) === day)) return rest;
   return [...rest, queuedPerson(person, "present")];
 }
 
 /** Undo before the sheet write drops the mark. After the write, queue a clear. */
-export function queueAbsent(items, person) {
+export function queueAbsent(items, person, active = null) {
   const list = items || [];
   const day = outboxDay(person.at);
   if (!attendanceKey(person) || !day) return list;
   const open = list.find((item) => item.kind === "present" && sameAttendance(item, person) && outboxDay(item.at) === day);
-  if (open && !open.cell && !open.log) {
+  if (open && open !== active && !open.cell && !open.log) {
     return list.filter((item) => item !== open && !(item.kind === "time" && sameAttendance(item, person) && outboxDay(item.at) === day));
   }
   const kept = list.filter((item) => {
+    if (item === active) return true;
     if (sameAttendance(item, person) && outboxDay(item.at) === day && (item.kind === "time" || item === open)) return false;
     return true;
   });
   if (kept.some((item) => item.kind === "absent" && sameAttendance(item, person) && outboxDay(item.at) === day)) return kept;
   const absent = queuedPerson({ ...person, studentName: person.studentName || open?.studentName || "" }, "absent");
-  absent.log = Boolean(open) && !open.log;
   return [...kept, absent];
 }
 
 /** A clock change before the log row exists stays on the present mark. */
-export function queueClock(items, person) {
+export function queueClock(items, person, active = null) {
   const list = items || [];
   const day = outboxDay(person.at);
   if (!attendanceKey(person) || !day) return list;
   const open = list.find((item) => item.kind === "present" && sameAttendance(item, person) && outboxDay(item.at) === day && !item.log);
-  if (open) return list.map((item) => (item === open ? { ...item, time: String(person.time || "").trim() } : item));
-  const rest = list.filter((item) => !(item.kind === "time" && sameAttendance(item, person) && outboxDay(item.at) === day));
+  if (open && open !== active) return list.map((item) => (item === open ? { ...item, time: String(person.time || "").trim() } : item));
+  const rest = list.filter((item) => item === active || !(item.kind === "time" && sameAttendance(item, person) && outboxDay(item.at) === day));
   return [...rest, queuedPerson(person, "time")];
 }
 

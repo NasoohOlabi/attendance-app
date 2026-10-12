@@ -512,9 +512,24 @@ test("a mark shows up before the sheet answers, and an early undo cancels it", (
   assert.equal(undo[0].log, false);
   assert.deepEqual(overlayPresent([{ name: "اسم أول", studentId: "00 00 000 001", rowNumber: 3, time: "08:00", logRow: 4 }], undo, day), []);
   const half = [{ ...edited[0], cell: true, log: false }];
-  assert.equal(queueAbsent(half, person)[0].log, true);
+  assert.equal(queueAbsent(half, person)[0].log, false);
   assert.equal(isOfflineError("Google API GET https://sheets.googleapis.com failed (no status): getaddrinfo ENOTFOUND"), true);
   assert.equal(isOfflineError("The caller does not have permission"), false);
+});
+
+test("undo and clock changes preserve an active write until it completes", () => {
+  const person = { studentId: "00 00 000 001", studentName: "اسم أول", rowNumber: 3, at: "2026-10-10T05:00:00.000Z", time: "08:00" };
+  const queued = queuePresent([], person);
+  const active = queued[0];
+  const undo = queueAbsent(queued, person, active);
+  assert.deepEqual(undo.map((item) => item.kind), ["present", "absent"]);
+  assert.equal(undo[0], active);
+  assert.deepEqual(overlayPresent([], undo, "10/10/2026"), []);
+  const edited = queueClock(queued, { ...person, time: "08:15" }, active);
+  assert.equal(edited[0], active);
+  assert.deepEqual(edited.map((item) => [item.kind, item.time]), [["present", "08:00"], ["time", "08:15"]]);
+  const afterUndo = queuePresent(undo, person, undo[1]);
+  assert.deepEqual(afterUndo.map((item) => item.kind), ["present", "absent"]);
 });
 
 test("a present mark puts the حاضر checkbox back on that cell", () => {

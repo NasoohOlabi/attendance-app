@@ -49,6 +49,10 @@ export const test = base.extend({
     const transcript = [];
     const runtimeErrors = [];
     const gates = [];
+    const liveScannerPids = () => [...new Set(captures.filter((item) => item.type === "started").map((item) => item.pid))].filter((pid) => {
+      try { process.kill(pid, 0); return true; }
+      catch (error) { if (error.code === "ESRCH") return false; throw error; }
+    });
     let stopping = false;
     const send = (response, value) => {
       response.writeHead(200, { "content-type": "application/json" });
@@ -126,9 +130,11 @@ export const test = base.extend({
     };
     const stop = async () => {
       stopping = true;
+      if (page && !page.isClosed()) await page.evaluate(() => window.attendance.openSettings());
       for (const gate of gates.splice(0)) gate.release();
       for (const response of waiters.splice(0)) send(response, { exitCode: 2, error: "timeout" });
       scripts.length = 0;
+      await expect.poll(liveScannerPids).toEqual([]);
       if (electron) {
         const trace = testInfo.outputPath(`trace-${Date.now()}.zip`);
         await electron.context().tracing.stop({ path: trace }).catch((error) => runtimeErrors.push(error.message));
@@ -136,7 +142,7 @@ export const test = base.extend({
         await electron.close();
         electron = null;
       }
-      await expect.poll(() => captures.filter((item) => item.type === "started").length - captures.filter((item) => item.type === "exited").length).toBe(0);
+      await expect.poll(liveScannerPids).toEqual([]);
     };
     const driver = {
       root, home, prints, configPath, sheets, captures, transcript,
@@ -165,7 +171,10 @@ export const test = base.extend({
       },
       async index() { return JSON.parse(await readFile(path.join(prints, "index.json"), "utf8")); },
       async files() { return readdir(path.join(prints, "templates")); },
-      async ready() { await expect(page.locator("#today-count")).toHaveText("0"); },
+      async ready() {
+        await expect(page.locator("#today-count")).toHaveText("0");
+        await expect.poll(async () => (await driver.state()).syncNote).toMatch(/^Synced /);
+      },
       async mark(id = "00 00 000 001") {
         driver.enqueue({ matchSid: `s-${id.replaceAll(" ", "-")}` });
       },
@@ -189,8 +198,15 @@ export const test = base.extend({
       await stop();
       server.closeAllConnections();
       await new Promise((resolve) => server.close(resolve));
-      const receipts = { root, config, captures, requests: sheets.requests, grids: sheets.grids, runtimeErrors, transcript };
-      await testInfo.attach("receipts", { body: Buffer.from(JSON.stringify(receipts, null, 2)), contentType: "application/json" });
+      const disk = {};
+      for (const file of ["home/Masjid/attendance-outbox.json", "home/Masjid/scan-times.json", "home/Masjid/v1/fingerprints/index.json", "home/Masjid/logs/attendance-2026-10-12.log"]) {
+        try { disk[file] = await readFile(path.join(root, file), "utf8"); }
+        catch (error) { if (error.code !== "ENOENT") throw error; }
+      }
+      const receipts = { root, config, captures, requests: sheets.requests, grids: sheets.grids, disk, runtimeErrors, transcript };
+      const receiptPath = testInfo.outputPath("receipts.json");
+      await writeFile(receiptPath, JSON.stringify(receipts, (_key, value) => value instanceof Map ? Object.fromEntries(value) : value, 2));
+      await testInfo.attach("receipts", { path: receiptPath, contentType: "application/json" });
       await testInfo.attach("test-root", { body: Buffer.from(root), contentType: "text/plain" });
       expect(runtimeErrors, "Unexpected runtime or fixture errors").toEqual([]);
       expect(transcript.join(""), "Unexpected external request").not.toContain("E2E blocked external request");

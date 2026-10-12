@@ -18,10 +18,13 @@ internal static class Program
             return 0;
         }
 
+        Uri? endpoint = null;
+        var started = false;
+        var exitCode = 1;
         try
         {
             var options = ParseArgs(args);
-            var endpoint = ReadEndpoint();
+            endpoint = ReadEndpoint();
             var root = Path.GetFullPath(Environment.GetEnvironmentVariable("ATTENDANCE_E2E_ROOT")
                 ?? throw new InvalidOperationException("ATTENDANCE_E2E_ROOT is required."));
             var output = ResolveUnderRoot(root, options.OutDir);
@@ -31,18 +34,33 @@ internal static class Program
 
             var identity = new { pid = Environment.ProcessId, argv = args, cwd = Environment.CurrentDirectory };
             await Post(endpoint, "/scanner/started", identity);
+            started = true;
             Console.WriteLine("init=0");
             Console.WriteLine("sensor_count=1");
 
             var script = await GetScript(endpoint);
-            var exitCode = await RunScenario(script, output, matchDir, options);
-            await Post(endpoint, "/scanner/exited", new { pid = Environment.ProcessId, argv = args, cwd = Environment.CurrentDirectory, exitCode });
+            exitCode = await RunScenario(script, output, matchDir, options);
             return exitCode;
         }
         catch (Exception error)
         {
             Console.WriteLine($"error={error.Message}");
+            exitCode = 1;
             return 1;
+        }
+        finally
+        {
+            if (started && endpoint is not null)
+            {
+                try
+                {
+                    await Post(endpoint, "/scanner/exited", new { pid = Environment.ProcessId, argv = args, cwd = Environment.CurrentDirectory, exitCode });
+                }
+                catch (Exception error)
+                {
+                    Console.WriteLine($"error={error.Message}");
+                }
+            }
         }
     }
 
@@ -160,15 +178,18 @@ internal static class Program
     private static Options ParseArgs(string[] args)
     {
         if (args.Length < 1 || args[0] != "identify") throw new ArgumentException("Expected identify command.");
+        var allowed = new HashSet<string>(["--timeout", "--out", "--prefix", "--match-dir", "--threshold"], StringComparer.Ordinal);
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var index = 1; index < args.Length; index += 2)
         {
             if (index + 1 >= args.Length || !args[index].StartsWith("--", StringComparison.Ordinal))
                 throw new ArgumentException("Expected --option value pairs.");
-            values[args[index]] = args[index + 1];
+            if (!allowed.Contains(args[index])) throw new ArgumentException($"Unknown option {args[index]}.");
+            if (!values.TryAdd(args[index], args[index + 1])) throw new ArgumentException($"Duplicate option {args[index]}.");
         }
         string Require(string key) => values.TryGetValue(key, out var value) ? value : throw new ArgumentException($"Missing {key}.");
-        _ = int.Parse(Require("--timeout"));
+        if (!int.TryParse(Require("--timeout"), out var timeout) || timeout <= 0)
+            throw new ArgumentException("--timeout must be a positive integer.");
         return new Options(Require("--out"), Require("--prefix"), Require("--match-dir"), int.Parse(Require("--threshold")));
     }
 
@@ -190,7 +211,3 @@ internal static class Program
     }
     private sealed class Event { public string Line { get; set; } = ""; public int DelayMs { get; set; } }
 }
-
-
-
-

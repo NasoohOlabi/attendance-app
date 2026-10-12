@@ -1,4 +1,13 @@
-[
-  "smoke uses the real preload and isolated built Electron app",
-  "smoke keeps settings reachable when the scanner path is missing"
+﻿[
+    "smoke uses the real preload and isolated built Electron app",
+    "smoke keeps settings reachable when the scanner path is missing",
+    "attendance matches by id and deduplicates repeated scans with identical names",
+    "attendance undo clears only the selected value and keeps its checkbox and other days",
+    "attendance clock edit rewrites the matching log stamp without changing its date or cell",
+    "outbox immediately shows offline marks, survives restart, and drains once",
+    "outbox undo before transmission cancels the queued mark and clock edit",
+    "outbox resumes a cell-success log-failure without duplicating the attendance write",
+    "outbox log append acknowledgement loss reconciles an accepted row",
+    "outbox log failure preserves present cell and reports the missing time log",
+    "outbox undo during a delayed cell write does not lose the next student\u0027s mark"
 ]

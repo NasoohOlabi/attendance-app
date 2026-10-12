@@ -1,4 +1,4 @@
-import { access, copyFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -47,7 +47,6 @@ import {
   queueAbsent,
   queueClock,
   queuePresent,
-  planClearRow,
   stampFromClock,
   withScanTimes,
   parseAttendanceGrid,
@@ -90,6 +89,7 @@ let generation = 0;
 let identifyPromise = null;
 let loopDone = Promise.resolve();
 let appRunning = true;
+let quitRequested = false;
 let printsEpoch = 0;
 let lock = Promise.resolve();
 let sheetDenied = false;
@@ -283,6 +283,8 @@ let namedClocks = {};
 let sheetPeople = [];
 let outbox = [];
 let flushTail = Promise.resolve();
+let activeWrite = null;
+let outboxSaveTail = Promise.resolve();
 let catalogAt = 0;
 
 function scanTimesPath() {
@@ -345,9 +347,16 @@ async function loadOutbox() {
   }
 }
 
-async function saveOutbox() {
-  await mkdir(path.dirname(outboxPath()), { recursive: true });
-  await writeFile(outboxPath(), JSON.stringify({ items: outbox }));
+function saveOutbox() {
+  const body = JSON.stringify({ items: outbox });
+  const save = outboxSaveTail.then(async () => {
+    const file = outboxPath();
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(`${file}.tmp`, body);
+    await rename(`${file}.tmp`, file);
+  });
+  outboxSaveTail = save.catch(() => {});
+  return save;
 }
 
 function waitingNote() {
@@ -391,7 +400,7 @@ function acceptPresent(student) {
   const person = queuedFrom(student);
   if (!person.studentId) return { op: "missing-id" };
   if (attendanceListed(shownPresent(), person)) return { op: "update", value: "حاضر" };
-  outbox = queuePresent(outbox, person);
+  outbox = queuePresent(outbox, person, activeWrite);
   if (person.rowNumber) rememberScan(person.rowNumber, new Date());
   saveOutbox().catch((err) => console.error(err.message));
   publishShown();
@@ -402,7 +411,7 @@ function acceptPresent(student) {
 function acceptAbsent(rowNumber, logRow) {
   const person = shownPresent().find((item) => item.rowNumber === Number(rowNumber));
   if (!person) return { ok: false, error: "That student is not on the sheet." };
-  outbox = queueAbsent(outbox, { ...person, at: new Date().toISOString(), logRow });
+  outbox = queueAbsent(outbox, { ...person, at: new Date().toISOString(), logRow }, activeWrite);
   forgetScan(person.rowNumber);
   saveOutbox().catch((err) => console.error(err.message));
   publishShown({ detail: `${person.name} removed from today.`, error: "" });
@@ -416,7 +425,7 @@ function acceptClock(rowNumber, logRow, time) {
   const person = shownPresent().find((item) => item.rowNumber === Number(rowNumber));
   if (!person) return { ok: false, error: "That student is not on the sheet." };
   const clock = clockFromStamp(stamp);
-  outbox = queueClock(outbox, { ...person, at: new Date().toISOString(), time: clock, logRow });
+  outbox = queueClock(outbox, { ...person, at: new Date().toISOString(), time: clock, logRow }, activeWrite);
   rememberClock(person.rowNumber, clock);
   saveOutbox().catch((err) => console.error(err.message));
   publishShown({ detail: `Time for ${person.name} set to ${stamp}.`, error: "" });
@@ -476,7 +485,13 @@ async function writeQueuedPresent(config, item) {
         const values = attendanceLogRow(item.studentId, when, header, item.studentName);
         const stamp = item.time ? stampFromClock(when, item.time) : "";
         if (stamp) values[logLayout(header).time] = stamp;
-        await appendSheetRow(client, config.logSpreadsheetId, config.logSheetGid, values);
+        const hits = logHits(log.rows, item.studentId, when);
+        const hit = hits.at(-1);
+        if (!hit) {
+          await appendSheetRow(client, config.logSpreadsheetId, config.logSheetGid, values);
+        } else if (stamp && hit.stamp !== stamp) {
+          await writeSheetCell(client, config.logSpreadsheetId, log.title, `${columnLetter(logLayout(header).time)}${hit.rowNumber}`, stamp);
+        }
       } catch (err) {
         if (isOfflineError(err.message) || isSheetPermissionError(err.message)) throw err;
         console.error(err.message);
@@ -496,9 +511,7 @@ async function writeQueuedAbsent(config, item) {
       getSheetGrid(client, config.spreadsheetId, config.sheetGid),
       getDateHeader(client, config.spreadsheetId, config.sheetGid),
     ]);
-    const plan = item.rowNumber
-      ? planClearRow(rows, item.rowNumber, when)
-      : planAttendance(rows, item.studentId, when, false, layout);
+    const plan = planAttendance(rows, item.studentId, when, false, layout);
     if (plan.op !== "update") return plan.op;
     await writeAttendanceCell(client, config.spreadsheetId, title, plan.a1, "");
     item.cell = true;
@@ -553,12 +566,14 @@ async function drainOutbox() {
   const config = currentConfig;
   while (outbox.length && client && !sheetDenied) {
     const item = outbox[0];
+    activeWrite = item;
     try {
       const result = await writeQueued(config, item);
-      outbox.shift();
+      outbox = outbox.filter((entry) => entry !== item);
       await saveOutbox();
       publish({ present: shownPresent(), syncNote: waitingNote() });
       if (result !== "ok") publish({ error: markDetail({ op: result, value: "حاضر" }) || "The sheet was not changed." });
+      if (item.logError) publish({ detail: markDetail({ op: "update", value: "حاضر", logError: item.logError }) });
     } catch (err) {
       console.error(err.message);
       if (isSheetPermissionError(err.message)) {
@@ -574,6 +589,8 @@ async function drainOutbox() {
       const note = await failureNote(config, err);
       publish({ syncNote: note, error: note });
       return;
+    } finally {
+      activeWrite = null;
     }
   }
   if (outbox.length) return;
@@ -1082,6 +1099,7 @@ async function startLoop() {
     detail: "Listening",
     fingerprintDir: config.fingerprintDir,
     config: publicConfig(config),
+    present: shownPresent(),
     canCloseSettings: true,
     error: "",
     enroll: null,
@@ -1625,7 +1643,12 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
   app.on("window-all-closed", () => app.quit());
-  app.on("before-quit", () => {
+  app.on("before-quit", (event) => {
+    if (quitRequested) return;
+    event.preventDefault();
+    quitRequested = true;
     appRunning = false;
+    generation += 1;
+    Promise.allSettled([identifyPromise, loopDone, outboxSaveTail]).then(() => app.quit());
   });
 }
