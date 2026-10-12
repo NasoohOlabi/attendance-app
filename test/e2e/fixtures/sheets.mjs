@@ -191,7 +191,10 @@ export function createSheets({ day = "12/10", students } = {}) {
             for (let c = startColumn; c <= endColumn; c++) {
               const cell = getCell(grid, r, c);
               const raw = grid.rows[r]?.[c] ?? "";
-              const value = render === "FORMULA" ? (cell.formula || "") : render === "UNFORMATTED_VALUE" ? (cell.userEnteredValue?.numberValue ?? raw) : (cell.formattedValue ?? raw);
+              const formula = cell.formula || (typeof raw === "string" && raw.startsWith("=") ? raw : "");
+              const count = /^=COUNTA\(([A-Z]+)3:\1\d*\)$/.exec(formula);
+              const calculated = count ? grid.rows.slice(2).filter((student) => student[a1Column(count[1])] != null && student[a1Column(count[1])] !== "").length : raw;
+              const value = render === "FORMULA" ? (formula || raw) : render === "UNFORMATTED_VALUE" ? (cell.userEnteredValue?.numberValue ?? calculated) : (cell.formattedValue ?? calculated);
               row.push(value);
             }
             while (row.length && row.at(-1) === "") row.pop();

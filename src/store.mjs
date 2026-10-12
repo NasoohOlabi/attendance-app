@@ -190,7 +190,13 @@ export function putStudent(index, student) {
   return index.students[key];
 }
 
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const calendarFormat = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Damascus", year: "numeric", month: "numeric", day: "numeric", weekday: "short" });
+
+function calendarDay(date) {
+  const parts = calendarFormat.formatToParts(date instanceof Date ? date : new Date(date));
+  const get = (type) => parts.find((part) => part.type === type)?.value;
+  return { year: Number(get("year")), month: Number(get("month")), day: Number(get("day")), weekday: get("weekday") };
+}
 
 function cells(row) {
   return (row || []).map((cell) => String(cell ?? "").trim());
@@ -216,14 +222,14 @@ export function columnLetter(index) {
 }
 
 export function dateHeaderText(date) {
-  const when = date instanceof Date ? date : new Date(date);
-  return `${WEEKDAYS[when.getDay()]} ${when.getDate()}/${when.getMonth() + 1}`;
+  const when = calendarDay(date);
+  return `${when.weekday} ${when.day}/${when.month}`;
 }
 
 /** Google Sheets serial, 1899-12-30 epoch. Uses the calendar date, not the UTC instant. */
 export function sheetsSerial(date) {
-  const when = date instanceof Date ? date : new Date(date);
-  const utc = Date.UTC(when.getFullYear(), when.getMonth(), when.getDate());
+  const when = calendarDay(date);
+  const utc = Date.UTC(when.year, when.month - 1, when.day);
   return Math.round((utc - Date.UTC(1899, 11, 30)) / 86400000);
 }
 
@@ -746,9 +752,7 @@ export function overlayPresent(people, items, day) {
 export function findDateColumn(header, date) {
   const when = date instanceof Date ? date : new Date(date);
   if (Number.isNaN(when.getTime())) return null;
-  const day = when.getDate();
-  const month = when.getMonth() + 1;
-  const weekday = WEEKDAYS[when.getDay()];
+  const { day, month, weekday } = calendarDay(when);
   let bare = null;
   for (let i = 0; i < (header || []).length; i++) {
     const parsed = parseDateHeader(header[i]);

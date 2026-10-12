@@ -271,6 +271,14 @@ test("date headers resolve to a column, including a bare day/month", () => {
   assert.equal(findDateColumn(GRID[0], new Date(2026, 9, 3)), null);
 });
 
+test("the date column and Sheets serial follow Damascus midnight across a new year", () => {
+  const instant = new Date("2026-12-31T21:30:03.000Z");
+  assert.equal(dateHeaderText(instant), "Fri 1/1");
+  assert.deepEqual(findDateColumn(["Thu 31/12", "Fri 1/1"], instant), { columnIndex: 1, header: "Fri 1/1" });
+  assert.equal(sheetsSerial(instant), 46388);
+  assert.equal(attendanceStamp(instant), "1/1/2027 00:30:03");
+});
+
 test("attendance mark patches only the one date cell", () => {
   const present = planAttendance(GRID, "00 00 000 001", new Date(2026, 6, 4), true);
   assert.equal(present.op, "update");

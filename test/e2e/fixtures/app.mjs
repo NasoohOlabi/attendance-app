@@ -41,7 +41,7 @@ export const test = base.extend({
       syncIntervalSeconds: 1,
       ...fixtureOptions.config,
     };
-    await writeFile(configPath, JSON.stringify(config));
+    await writeFile(configPath, fixtureOptions.configText ?? JSON.stringify(config));
     const sheets = createSheets(fixtureOptions.sheets);
     const scripts = [];
     const waiters = [];
@@ -65,6 +65,7 @@ export const test = base.extend({
             const options = await jsonBody(request);
             for (const gate of gates) {
               if (gate.predicate(options)) {
+                gate.hits += 1;
                 gate.hit();
                 await gate.wait;
               }
@@ -84,7 +85,7 @@ export const test = base.extend({
             });
           }
         } else if (["/scanner/started", "/scanner/exited"].includes(request.url)) {
-          captures.push({ type: request.url.endsWith("started") ? "started" : "exited", ...await jsonBody(request) });
+          captures.push({ at: Date.now(), type: request.url.endsWith("started") ? "started" : "exited", ...await jsonBody(request) });
           send(response, {});
         } else {
           throw new Error(`Unknown fixture endpoint ${request.method} ${request.url}`);
@@ -108,7 +109,7 @@ export const test = base.extend({
       APPDATA: path.join(root, "appdata"),
       TEMP: temp,
       TMP: temp,
-      TZ: "Asia/Damascus",
+      TZ: fixtureOptions.timezone || "Asia/Damascus",
       ATTENDANCE_CONFIG: configPath,
       FINGERPRINT_DIR: prints,
       ZK4500_CLI: config.zk4500Cli,
@@ -153,9 +154,9 @@ export const test = base.extend({
         let release;
         const waiting = new Promise((resolve) => { hit = resolve; });
         const wait = new Promise((resolve) => { release = resolve; });
-        const gate = { predicate, wait, hit, release };
+        const gate = { predicate, wait, hit, release, hits: 0 };
         gates.push(gate);
-        return { waiting, release };
+        return { waiting, release, get hits() { return gate.hits; } };
       },
       enqueue(script = {}) {
         const value = { events: [{ line: "finger=detected" }], template: "synthetic-print", score: 20, ...script };
