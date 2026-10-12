@@ -1,26 +1,29 @@
 # Publication audit
 
-Quick audit on 2026-10-10. Recommendation: do not publish the current repository yet.
+Updated 2026-10-12. Source appears clean of the checked secrets, but public publication readiness is not yet established.
 
-- No common private-key, Google API-key, GitHub-token, or AWS access-key signatures were found in the tracked files across all 24 reachable commits. This was a pattern scan, not a guarantee that every possible secret was detected.
-- Tracked history contains no service-account JSON, attendance.config.json, capture directory, or fingerprint roster file by filename. The current ignore rules exclude the known credentials and local output folders.
-- Real spreadsheet IDs, the service-account email, mosque details, personal Windows paths, and student-like names appear in source, documentation, or test fixtures. Spreadsheet IDs and the email are not credentials. Review which details may be public and replace private details before publication. Existing history retains them after ordinary edits.
-- npm audit reports 11 affected dependency packages: 3 high and 8 moderate. Electron is among the affected packages and is a shipped runtime despite being declared as a devDependency. npm audit --omit=dev reports zero, so that result alone does not establish that the desktop app is safe. Update and verify dependencies before distributing a release.
-- No root project license or README is present. Choose a license if public reuse is intended and document setup. Bundled fonts have OFL notices, including notices copied into releases.
-- The repository depends on a separate local scanner project for release builds. It cannot currently produce a scanner-equipped installer from a fresh clone alone.
+## Checks performed
 
-## Name
+- Working tree was clean before this audit. No Git remote is configured.
+- Scanned tracked text across all 24 reachable commits for common private-key, Google API-key, GitHub-token and AWS access-key signatures. No matches. This pattern scan is not a guarantee of absence of every possible secret.
+- Checked current files and reachable history for the previously known spreadsheet IDs, service-account identifier, key filename and named fixture. No matches.
+- Historical filenames showed no tracked local attendance.config.json, service-account file, capture directory or fingerprint roster.
+- Local configuration and the known key file are ignored. Source defaults for sheet identifiers and credential paths are empty. Actual local credentials were not printed or added to Git.
+- Master contains 20 commits. Internal T3 checkpoint refs remain. Publication should push only intended branches/tags, never mirror all refs. No ref was changed by this audit.
 
-The local folder, package.json, and bun.lock use attendance-app. Sheet ids and the service-account path are local configuration, not source defaults. The display name remains Masjid Attendance and the Electron app ID remains com.masjid.attendance. Historical references are covered by the separate publication cleanup plan. A full blob inventory on 2026-10-10 found no confirmed credential in git history. Raw results stay outside the repository.
+## Remaining publication work
 
-## Scanner distribution
+- Verify redistribution rights/provenance for the tracked scanner/AxInterop.ZKFPEngXControl.dll and scanner/Interop.ZKFPEngXControl.dll. Source publication includes those binaries even without shipping the vendor driver.
+- Add a README describing setup, private Google configuration and scanner prerequisites. Choose a root project license if public reuse is intended; a missing license does not itself expose secrets.
+- Resolve or individually assess dependency advisories before claiming the app/release is secure. bun audit currently reports advisories for Electron, extract-zip, http-cache-semantics and sprintf-js, including high severity. Electron is shipped despite being declared a devDependency. Package advisories do not establish that every listed issue is exploitable in this app.
+- Update release tasks and architecture notes to match implemented behavior. The history checklist says private history was replaced with one public root commit; master now has 20 commits. Confirm the intended cleaned ancestry rather than relying on that checklist alone. This commit count is not a secret finding.
 
-The scanner source is in `scanner/`. `node scripts/scanner-release.mjs` publishes a self-contained win-x86 CLI into `staging/scanner`, and the installer copies that folder. The staged output includes the .NET runtime. It does not include the USB driver or the Biokey ActiveX control.
+## Installer status
 
-The installed FPSensor folder contains SDK files and uninstallers, but no driver installer or INF/SYS/CAT package was found there. No matching scanner installer archive was found beside this repository during this check.
+Scanner source lives in scanner/. scripts/scanner-release.mjs publishes self-contained win-x86 output into staging/scanner, which the Electron installer copies to resources/scanner. The build no longer requires the sibling workspace.
 
-Before adding the driver, obtain the compatible vendor installer and its redistribution terms. Keep the existing ZKFPEngX implementation. Copying installed DLLs alone will not install the USB driver or register the ActiveX component. Driver installation also needs an elevation flow; the current app installer has allowElevation disabled.
+The CLI still targets net9.0-windows. The staged runtime does not supply the USB driver or Biokey ActiveX control. A compatible vendor installer, redistribution terms, elevation handling and clean-machine/hardware verification remain needed for the promised complete one-installer experience.
 
-Official vendor downloads: https://www.zkteco.com/en/download_center
+The package name is attendance-app; display name is Masjid Attendance; app identity is com.masjid.attendance. The legacy attendance-service profile path is intentional for existing data compatibility.
 
-Redistribution rights for the required legacy driver/SDK were not established by this audit. The package/path rename was subsequently completed. No driver binaries were added and nothing was pushed.
+No dependencies, history, installer or credentials were changed. Nothing was pushed.
