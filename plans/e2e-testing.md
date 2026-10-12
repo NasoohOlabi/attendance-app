@@ -22,6 +22,8 @@ The isolated Electron harness, 50-case inventory, stateful Sheets fixture, scrip
 
 The current app uses pinned Electron 44.7.0 and encrypted service-account import. These supersede the Electron 38 and key-path Settings details captured during the original analysis. Tests cover the current UI.
 
+Local verification on 2026-10-12: `bun run test` passed 69 core/integration cases. `bun run test:e2e` built the app and passed all 50 Electron cases in one full run, with zero skips and retries, at source `a9d090b2e815acfaf74dd775308e03ca8a6ff919`. Receipts record Node 24.20.0, Electron 44.7.0, and Playwright 1.64.0. Later commits add CI/release documentation and verifier tests, plus a reporter diagnostic wording correction; application and E2E behavior are unchanged. The independent Luna review found no definite regression. The plan checker reports five phase sections and zero structural problems.
+
 Physical reader checks, disposable live-Sheets readback, installer upgrade and native-dialog checks, remote CI/branch protection, performance evidence, and repeated stability runs remain outstanding. See [the release checklist](../test/RELEASE-CHECKLIST.md). Automated coverage is a regression gate, not a guarantee that no defect can ever occur.
 
 ## Program checklist
