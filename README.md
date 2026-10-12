@@ -62,3 +62,9 @@ The script creates a separate, branch-only clone and removes the unverified inte
 ## License
 
 The app's own source is under the [MIT license](LICENSE). Font licenses are in `src/renderer/fonts/OFL-*.txt`. Third-party dependencies, SDK components, and locally supplied scanner wrappers retain their own terms. MIT does not grant permission to redistribute vendor software.
+
+## Previous installer security issue
+
+A packaging check found a service-account key in the previous local release app. The old installer and unpacked app were moved to `release/quarantine/`. Do not distribute those artifacts. New packaging uses an allowlist and an `afterPack` check that rejects unexpected root files and credential-shaped JSON.
+
+If an old installer was shared, or sharing is uncertain, create a replacement key in Google Cloud, update the private local key configuration, verify access, and revoke the old key. Removing the key from a new build does not invalidate old copies. See [Google's service-account key guidance](https://cloud.google.com/iam/docs/best-practices-for-managing-service-account-keys).

@@ -1,29 +1,30 @@
 # Publication audit
 
-Updated 2026-10-12. Source appears clean of the checked secrets, but public publication readiness is not yet established.
+Updated 2026-10-12. Public source preparation is complete for the separately filtered publication copy. This working repository retains historical interop binaries; do not publish it directly or mirror its internal refs.
 
-## Checks performed
+## Completed source work
 
-- Working tree was clean before this audit. No Git remote is configured.
-- Scanned tracked text across all 24 reachable commits for common private-key, Google API-key, GitHub-token and AWS access-key signatures. No matches. This pattern scan is not a guarantee of absence of every possible secret.
-- Checked current files and reachable history for the previously known spreadsheet IDs, service-account identifier, key filename and named fixture. No matches.
-- Historical filenames showed no tracked local attendance.config.json, service-account file, capture directory or fingerprint roster.
-- Local configuration and the known key file are ignored. Source defaults for sheet identifiers and credential paths are empty. Actual local credentials were not printed or added to Git.
-- Master contains 20 commits. Internal T3 checkpoint refs remain. Publication should push only intended branches/tags, never mirror all refs. No ref was changed by this audit.
+- Added a README and MIT license for the app's own source. Third-party licenses remain separate.
+- Upgraded Electron to 44.7.0, electron-builder to 26.15.3, and Vite to 6.4.4. Required Node version is now 22.12 or later. Overrides select http-cache-semantics 4.3.0 and global-agent 4.1.3; the latter removes the vulnerable sprintf-js dependency chain. bun audit reports no vulnerabilities.
+- Removed both scanner interop DLLs from tracking while preserving the ignored local copies. Scanner publishing still works locally and fails clearly before deleting staging when a wrapper is missing.
+- Added scripts/prepare-publication.ps1. It makes a separate committed-branch clone, filters both interop DLLs from its history, excludes checkpoint/tag refs, checks common secret signatures and commit messages, and leaves no remote. No push occurs.
+- Verified a filtered clone with frozen-lockfile installation, core tests, production build, dependency audit, ref inspection and history checks. Pattern scanning cannot prove absence of every possible secret.
+- Verified the built renderer/preload on Electron 44.7.0, including state IPC, settings, Arabic RTL and sandboxed Node isolation. Directory packaging also passed. Physical scanner and Google writes were not exercised in this task.
 
-## Remaining publication work
+## Confirmed packaging security bug
 
-- Verify redistribution rights/provenance for the tracked scanner/AxInterop.ZKFPEngXControl.dll and scanner/Interop.ZKFPEngXControl.dll. Source publication includes those binaries even without shipping the vendor driver.
-- Add a README describing setup, private Google configuration and scanner prerequisites. Choose a root project license if public reuse is intended; a missing license does not itself expose secrets.
-- Resolve or individually assess dependency advisories before claiming the app/release is secure. bun audit currently reports advisories for Electron, extract-zip, http-cache-semantics and sprintf-js, including high severity. Electron is shipped despite being declared a devDependency. Package advisories do not establish that every listed issue is exploitable in this app.
-- Update release tasks and architecture notes to match implemented behavior. The history checklist says private history was replaced with one public root commit; master now has 20 commits. Confirm the intended cleaned ancestry rather than relying on that checklist alone. This commit count is not a secret finding.
+The previous packaging configuration allowed a local service-account key into app.asar. The key was found in a private verification build and the prior release's unpacked app. Git source/history scans did not find that credential. No secret values were printed or committed.
 
-## Installer status
+The build now allows only out/, package.json and LICENSE, plus automatically collected production dependencies. An afterPack guard rejects unexpected root files and credential-shaped JSON. It rejects the known unsafe old package and accepts the fixed one. This corrects the failed root-JSON exclusion instead of adding another filename-specific rule.
 
-Scanner source lives in scanner/. scripts/scanner-release.mjs publishes self-contained win-x86 output into staging/scanner, which the Electron installer copies to resources/scanner. The build no longer requires the sibling workspace.
+The old setup EXE, blockmap and unpacked app were moved to ignored release/quarantine/. Do not distribute them. Sharing history is uncertain; the account owner must replace the potentially exposed service-account key, update private configuration, verify access and revoke the old key. No key rotation was performed. This is a confirmed security bug; no unauthorized access or public disclosure has been established.
 
-The CLI still targets net9.0-windows. The staged runtime does not supply the USB driver or Biokey ActiveX control. A compatible vendor installer, redistribution terms, elevation handling and clean-machine/hardware verification remain needed for the promised complete one-installer experience.
+Google guidance: https://cloud.google.com/iam/docs/best-practices-for-managing-service-account-keys
 
-The package name is attendance-app; display name is Masjid Attendance; app identity is com.masjid.attendance. The legacy attendance-service profile path is intentional for existing data compatibility.
+## Source publication versus installer distribution
 
-No dependencies, history, installer or credentials were changed. Nothing was pushed.
+Only the verified filtered source copy is intended for GitHub publication. Locally supplied interop wrappers and vendor SDK/driver components are not included in that copy. Their redistribution rights remain unresolved for binary releases.
+
+The self-contained scanner still targets net9.0-windows and does not install the USB driver or Biokey ActiveX control. The complete driver-installing setup, supported-runtime migration and clean-machine/hardware checks remain release work. No new setup installer was shipped by this task.
+
+The package remains attendance-app, display name Masjid Attendance, app identity com.masjid.attendance, and legacy attendance-service user profile. No credentials, private configuration or live scanner lifecycle were changed. Nothing was pushed.
