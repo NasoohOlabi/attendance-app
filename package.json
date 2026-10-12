@@ -4,6 +4,7 @@
   "private": true,
   "description": "Masjid attendance fingerprint app",
   "author": "Masjid",
+  "license": "MIT",
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
