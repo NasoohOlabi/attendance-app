@@ -42,7 +42,7 @@ export default class E2EReporter {
         if (missing.length) this.failures.push(`Missing E2E cases: ${missing.join("; ")}`);
         if (unexpected.length) this.failures.push(`Unreviewed E2E cases: ${unexpected.join("; ")}`);
       } else if (expected !== undefined) {
-        this.failures.push("E2E coverage inventory must be an array of test path and title strings.");
+        this.failures.push("E2E coverage inventory must be an array of test title strings.");
       }
     }
     for (const failure of this.failures) console.error(failure);

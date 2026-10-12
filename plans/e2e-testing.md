@@ -4,7 +4,7 @@ Protect the mosque operator's attendance, saved fingerprints, and settings with 
 Keep the existing core tests. Add one Windows E2E suite, a scripted scanner process, and a stateful Sheets test client.
 Deliver five small changes in order, E2E-1 through E2E-5. These are planning ids, not opened PRs.
 Block releases on known regressions, failed checks, and missing hardware evidence. No test suite can guarantee that every future defect is impossible.
-This document is a plan only. No application changes, real sheet writes, scanner captures, or release builds are authorized by this plan.
+Implementation was subsequently authorized by the operator. The original phase checklist below remains the acceptance target; unchecked items are not claimed complete. Real sheet writes, scanner captures, and release builds have not been performed.
 
 ## How to read this
 
@@ -14,7 +14,15 @@ Execute under `C:/Users/OMEN/.codex/skills/poteto-mode/playbooks/autopilot-stack
 
 Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
-Use the feature inventory in Appendix D as the coverage checklist. A green screenshot alone does not prove a write. Pair each user action with the resulting sheet state, disk state, and request history. All new commands and test paths below are proposed, not currently available.
+Use the feature inventory in Appendix D as the coverage checklist. A green screenshot alone does not prove a write. Pair each user action with the resulting sheet state, disk state, and request history. Available commands and current implementation details are in [the testing guide](../test/README.md).
+
+## Implementation checkpoint
+
+The isolated Electron harness, 50-case inventory, stateful Sheets fixture, scripted native scanner, strict reporter, Windows CI workflow, and release-receipt verifier are implemented. Tests exposed and drove fixes for queued-write races, partial-log retries, graceful scanner shutdown, Damascus calendar dates, and restoring a pending print after restart. The decision trail is [e2e-decisions.tsv](e2e-decisions.tsv).
+
+The current app uses pinned Electron 44.7.0 and encrypted service-account import. These supersede the Electron 38 and key-path Settings details captured during the original analysis. Tests cover the current UI.
+
+Physical reader checks, disposable live-Sheets readback, installer upgrade and native-dialog checks, remote CI/branch protection, performance evidence, and repeated stability runs remain outstanding. See [the release checklist](../test/RELEASE-CHECKLIST.md). Automated coverage is a regression gate, not a guarantee that no defect can ever occur.
 
 ## Program checklist
 
