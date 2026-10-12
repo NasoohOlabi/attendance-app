@@ -10,7 +10,7 @@ At the end of every user prompt, commit the work from that prompt. When a prompt
 
 ## Stack
 
-Node ESM, Bun, electron-vite (Vite 6), Electron 38, vanilla renderer (no React). `bun start` serves the renderer at `http://localhost:5173/` and opens the window. Tests: `bun test` (`node --test test/core.test.mjs`).
+Node ESM, Bun, electron-vite (Vite 6), Electron 44, vanilla renderer (no React). `bun start` serves the renderer at `http://localhost:5173/` and opens the window. Tests: `bun test` (`node --test test/core.test.mjs`).
 
 - Main process: `src/main/index.js`
 - Preload: `src/preload/`
