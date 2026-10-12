@@ -13,6 +13,9 @@
     "build": "electron-vite build",
     "dist": "node scripts/scanner-release.mjs && bun run build && electron-builder --win nsis",
     "release": "node scripts/release.mjs",
+    "lint": "node scripts/security-lint.mjs",
+    "lint:history": "node scripts/security-lint.mjs --history HEAD",
+    "setup:hooks": "node scripts/install-hooks.mjs",
     "test": "node --test test/core.test.mjs test/integration/*.test.mjs",
     "test:e2e": "node scripts/test-e2e.mjs",
     "verify:release": "node scripts/verify-release.mjs"
