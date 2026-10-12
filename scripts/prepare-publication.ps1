@@ -49,7 +49,7 @@ try {
         throw 'Disallowed file remains in reachable history. Do not publish this copy.'
     }
 
-    $secretPattern = '-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----|"private_key"\s*:|AIza[0-9A-Za-z_-]{35}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}'
+    $secretPattern = '-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----|"private_key"\s*:\s*"[^"\r\n]{64,}|AIza[0-9A-Za-z_-]{35}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}'
     foreach ($revision in (Invoke-Git -Repo $publicationRepo -GitArgs @('rev-list', '--all'))) {
         $null = & git -C $publicationRepo grep -I -l -E -- $secretPattern $revision
         if ($LASTEXITCODE -eq 0) { throw 'A possible secret remains in history. Review privately before publication.' }

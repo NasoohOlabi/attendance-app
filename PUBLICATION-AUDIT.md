@@ -9,6 +9,7 @@ Updated 2026-10-12. Public source preparation is complete for the separately fil
 - Removed both scanner interop DLLs from tracking while preserving the ignored local copies. Scanner publishing still works locally and fails clearly before deleting staging when a wrapper is missing.
 - Added scripts/prepare-publication.ps1. It makes a separate committed-branch clone, filters both interop DLLs from its history, excludes checkpoint/tag refs, checks common secret signatures and commit messages, and leaves no remote. No push occurs.
 - Verified a filtered clone with frozen-lockfile installation, core tests, production build, dependency audit, ref inspection and history checks. Pattern scanning cannot prove absence of every possible secret.
+- Reviewed the E2E fixture's synthetic, nonfunctional key placeholder as a false positive. The history scan checks key material rather than blocking every occurrence of the private_key property name.
 - Verified the built renderer/preload on Electron 44.7.0, including state IPC, settings, Arabic RTL and sandboxed Node isolation. Directory packaging also passed. Physical scanner and Google writes were not exercised in this task.
 
 ## Confirmed packaging security bug
