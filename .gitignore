@@ -25,3 +25,5 @@ service-account*.json
 ax.res
 _procs.ps1
 _ildasm.bat
+test-results*/
+playwright-report/

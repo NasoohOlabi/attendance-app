@@ -1,0 +1,2 @@
+ts	phase	decision	why	evidence	result
+2026-10-12T00:00:00Z	architecture	Use a test-only Electron entry with isolated home and Google transport	Avoid production test hooks while exercising real IPC and request construction	test/e2e/entry.mjs	compatibility probe pending

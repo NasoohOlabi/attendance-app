@@ -1,0 +1,4 @@
+[
+  "smoke uses the real preload and isolated built Electron app",
+  "smoke keeps settings reachable when the scanner path is missing"
+]
