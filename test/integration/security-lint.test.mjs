@@ -7,6 +7,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const script = fileURLToPath(new URL('../../scripts/security-lint.mjs', import.meta.url));
+const hook = fileURLToPath(new URL('../../.githooks/pre-push', import.meta.url));
 test('security lint blocks staged secrets, deleted historical secrets, unsafe packaging and checkpoint pushes', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'attendance-security-'));
   const git = (...args) => execFileSync('git', args, { cwd, stdio: 'pipe', encoding: 'utf8' }).trim();
@@ -33,6 +34,10 @@ test('security lint blocks staged secrets, deleted historical secrets, unsafe pa
     git('rm', 'notes.txt'); git('commit', '-m', 'Delete credential');
     assert.equal(lint().status, 0);
     assert.equal(lint(['--history', 'HEAD']).status, 1);
+    const unsafeOid = git('rev-parse', 'HEAD');
+    const hookResult = spawnSync(process.execPath, [hook], { cwd, encoding: 'utf8', input: `refs/heads/master ${unsafeOid} refs/heads/master ${'0'.repeat(40)}\n` });
+    assert.equal(hookResult.status, 1);
+    assert.ok(!hookResult.stderr.includes(token));
     writeFileSync(join(cwd, 'attendance.config.json'), '{}'); git('add', '.');
     assert.equal(lint().status, 1);
   } finally { rmSync(cwd, { recursive: true, force: true }); }

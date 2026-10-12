@@ -1,2 +1,3 @@
 #!/usr/bin/env node
+process.argv.push('--pre-push');
 import('../scripts/security-lint.mjs');
