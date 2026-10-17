@@ -196,6 +196,26 @@ test("attendance grid reads the name and the Marif id", () => {
   assert.equal(canonicalStudentId("اسم"), "");
 });
 
+test("a named sheet row with a blank Marif id stays on the roster", () => {
+  const rows = [
+    ["إسم كامل", "معرف", "Sat 17/10"],
+    ["", "", "1"],
+    ["عمار الراس", ""],
+    ["", ""],
+    ["محمد الراس", "not-an-id"],
+  ];
+  const grid = parseAttendanceGrid(rows);
+  assert.deepEqual(
+    grid.students.map((student) => [student.studentName, student.studentId, student.rowNumber]),
+    [
+      ["عمار الراس", "", 3],
+      ["محمد الراس", "", 5],
+    ],
+  );
+  assert.deepEqual(grid.duplicates, []);
+  assert.equal(planAttendance(rows, "", new Date(2026, 9, 17), true).op, "missing-id");
+});
+
 test("a match profile is the filled Info cells that are not dates", () => {
   const header = ["إسم كامل", "معرف", "أهل", "طالب", "أهل 2", "ملزم", "الإسم", "كنية", "حلقة", "صف", "الحضور", "مصنف", "نسبة الحضور", "Sat 10/10"];
   const row = ["محمد أسامي", "00 00 000 005", "09 52 397 099", "", "طريق المحولة روضة أمل الغد بناء ١٣١", "TRUE", "محمد", "أسامي", "أبو بكر", "5", "1", "", "100%", "حاضر"];
@@ -360,6 +380,7 @@ test("the same Marif id writes nothing, and the same name with two ids is fine",
       ["اسم سابع", "00 00 000 140", 5],
       ["اسم سابع", "00 00 000 140", 6],
       ["اسم ثامن", "00 00 000 196", 7],
+      ["بدون", "", 8],
     ],
   );
   assert.deepEqual(grid.duplicates, ["00 00 000 140"]);

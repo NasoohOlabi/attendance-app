@@ -456,9 +456,10 @@ export function parseAttendanceGrid(rows) {
   const counts = new Map();
   for (let i = start; i < list.length; i++) {
     const studentId = cols.id < 0 ? "" : canonicalStudentId(list[i]?.[cols.id]);
-    if (!studentId) continue;
-    counts.set(studentId, (counts.get(studentId) || 0) + 1);
-    students.push({ studentId, studentName: nameFromRow(list[i], cols), rowNumber: i + 1 });
+    const studentName = nameFromRow(list[i], cols);
+    if (!studentId && !studentName) continue;
+    if (studentId) counts.set(studentId, (counts.get(studentId) || 0) + 1);
+    students.push({ studentId, studentName, rowNumber: i + 1 });
   }
   const duplicates = [];
   for (const [id, count] of counts) {
