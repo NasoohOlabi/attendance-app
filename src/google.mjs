@@ -29,7 +29,29 @@ export const SHEET_RATE_LIMIT = "Google Sheets is rate limited. Trying again in 
 
 const READ_PAUSE_MS = 60_000;
 let readsPausedUntil = 0;
-const sheetTitles = new Map();
+const sheetTitles = new WeakMap();
+
+function titlesFor(client) {
+  if (!sheetTitles.has(client)) sheetTitles.set(client, new Map());
+  return sheetTitles.get(client);
+}
+
+async function sheetProperties(client, spreadsheetId) {
+  const titles = titlesFor(client);
+  if (!titles.has(spreadsheetId)) {
+    const request = grequest(client, {
+      url: sheetsUrl(spreadsheetId, "?fields=sheets.properties(sheetId,title)"),
+    }).then((meta) => (meta.sheets || []).map((sheet) => sheet.properties));
+    titles.set(spreadsheetId, request);
+    try {
+      await request;
+    } catch (err) {
+      titles.delete(spreadsheetId);
+      throw err;
+    }
+  }
+  return titles.get(spreadsheetId);
+}
 
 export function isOfflineError(message) {
   const text = String(message || "");
@@ -95,17 +117,10 @@ function quoteTitle(title) {
 }
 
 async function sheetTitle(client, spreadsheetId, sheetGid) {
-  const key = `${spreadsheetId}:${Number(sheetGid)}`;
-  const saved = sheetTitles.get(key);
-  if (saved) return saved;
-  const meta = await grequest(client, {
-    url: sheetsUrl(spreadsheetId, "?fields=sheets.properties(sheetId,title)"),
-  });
-  const sheet = (meta.sheets || []).find((item) => item.properties?.sheetId === Number(sheetGid));
+  const sheets = await sheetProperties(client, spreadsheetId);
+  const sheet = sheets.find((item) => item?.sheetId === Number(sheetGid));
   if (!sheet) throw new Error(`Sheet gid ${sheetGid} was not found.`);
-  const title = sheet.properties.title;
-  sheetTitles.set(key, title);
-  return title;
+  return sheet.title;
 }
 
 export async function getSheetGrid(client, spreadsheetId, sheetGid) {
@@ -252,14 +267,14 @@ export async function ensureDateColumn(client, spreadsheetId, sheetGid, date) {
 
 /** Adds one row under the existing table. Does not change the header row. */
 export async function appendSheetRow(client, spreadsheetId, sheetGid, values) {
-  const props = await sheetMeta(client, spreadsheetId, sheetGid);
-  const range = encodeURIComponent(`${quoteTitle(props.title)}!A:ZZ`);
+  const title = await sheetTitle(client, spreadsheetId, sheetGid);
+  const range = encodeURIComponent(`${quoteTitle(title)}!A:ZZ`);
   await grequest(client, {
     url: `${sheetsUrl(spreadsheetId, `/values/${range}:append`)}?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
     method: "POST",
     data: { values: [values] },
   });
-  return props.title;
+  return title;
 }
 
 /** Delete every row under the header in one cut. Row 1 stays. lastRow is the last 1-based row. */
@@ -337,12 +352,10 @@ function a1Start(a1) {
 }
 
 async function sheetIdByTitle(client, spreadsheetId, title) {
-  const meta = await grequest(client, {
-    url: sheetsUrl(spreadsheetId, "?fields=sheets.properties(sheetId,title)"),
-  });
-  const sheet = (meta.sheets || []).find((item) => item.properties?.title === title);
+  const sheets = await sheetProperties(client, spreadsheetId);
+  const sheet = sheets.find((item) => item?.title === title);
   if (!sheet) throw new Error(`Sheet ${title} was not found.`);
-  return sheet.properties.sheetId;
+  return sheet.sheetId;
 }
 
 /** One date cell. Puts the حاضر checkbox back in the same write that sets or clears the value. */

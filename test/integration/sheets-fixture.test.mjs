@@ -39,6 +39,28 @@ test("attendance writes update one value and keep its checkbox validation", asyn
   assert.equal(grid.rows[2][1], "00 00 000 001");
 });
 
+test("concurrent reads and repeated writes share metadata for each client", async () => {
+  const sheets = createSheets();
+  await Promise.all([
+    getSheetGrid(sheets, "attendance-test", 1),
+    getSheetGrid(sheets, "attendance-test", 1),
+  ]);
+  await writeAttendanceCell(sheets, "attendance-test", "Info", "C3", "");
+  await writeAttendanceCell(sheets, "attendance-test", "Info", "C3", "");
+  assert.equal(sheets.requests.filter((item) => item.url.includes("fields=sheets.properties")).length, 1);
+  const other = createSheets();
+  await getSheetGrid(other, "attendance-test", 1);
+  assert.equal(other.requests.filter((item) => item.url.includes("fields=sheets.properties")).length, 1);
+});
+
+test("failed metadata reads can be retried", async () => {
+  const sheets = createSheets();
+  sheets.offline = true;
+  await assert.rejects(getSheetGrid(sheets, "attendance-test", 1), /offline/);
+  sheets.offline = false;
+  assert.equal((await getSheetGrid(sheets, "attendance-test", 1)).title, "Info");
+});
+
 test("log appends and descending row deletion preserve the header and unrelated row", async () => {
   const sheets = createSheets();
   await appendSheetRow(sheets, "pages-test", 2, ["00 00 000 001", "أحمد طالب", "12/10/2026 08:30:00"]);

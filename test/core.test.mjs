@@ -35,8 +35,6 @@ import {
   attendanceLogRow,
   attendanceStamp,
   canonicalStudentId,
-  catalogDue,
-  CATALOG_REFRESH_MS,
   fingerprintFiles,
   fingerprintHeaderMissing,
   fingerprintSheetRow,
@@ -512,13 +510,6 @@ test("a sheet permission error asks to share as Editor", () => {
   assert.equal(explainApiFailure(other, email).includes("Share as Editor"), false);
   const permission = "Google API GET https://sheets.googleapis.com/v4/spreadsheets/x failed (403): The caller does not have permission";
   assert.match(explainApiFailure(permission, email), /Sheet permission denied\. Share as Editor with editor@example/);
-});
-
-test("the student catalog refreshes at most once every 10 seconds", () => {
-  assert.equal(CATALOG_REFRESH_MS, 10_000);
-  assert.equal(catalogDue(0, 10_000), true);
-  assert.equal(catalogDue(1_000, 10_999), false);
-  assert.equal(catalogDue(1_000, 11_000), true);
 });
 
 test("a mark shows up before the sheet answers, and an early undo cancels it", () => {

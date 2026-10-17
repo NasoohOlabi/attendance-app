@@ -34,7 +34,6 @@ import {
   attendanceStamp,
   attachLogTimes,
   canonicalStudentId,
-  catalogDue,
   clocksFromAppLog,
   clockFromStamp,
   columnLetter,
@@ -274,7 +273,6 @@ function reportSheet(title, rows) {
 }
 
 async function reloadStudents(config) {
-  catalogAt = Date.now();
   const { title, rows } = await getSheetGrid(client, config.spreadsheetId, config.sheetGid);
   attendanceRows = rows;
   reportSheet(title, rows);
@@ -289,20 +287,6 @@ async function reloadStudents(config) {
   return { merged, rows, title };
 }
 
-/** Search keeps the current list, then rereads the sheet at most once every 10 seconds. */
-function refreshCatalog() {
-  if (!catalogDue(catalogAt, Date.now())) return;
-  if (!client || sheetDenied || !currentConfig) return;
-  catalogAt = Date.now();
-  void reloadStudents(currentConfig).catch((err) => {
-    console.error(err.message);
-    if (isSheetPermissionError(err.message)) {
-      sheetDenied = true;
-      failureNote(currentConfig, err).then((note) => publish({ syncNote: note, error: note }));
-    }
-  });
-}
-
 let scanTimes = { day: "", rows: {} };
 let namedClocks = {};
 let sheetPeople = [];
@@ -310,7 +294,6 @@ let outbox = [];
 let flushTail = Promise.resolve();
 let activeWrite = null;
 let outboxSaveTail = Promise.resolve();
-let catalogAt = 0;
 
 function scanTimesPath() {
   return path.join(homedir(), "Masjid", "scan-times.json");
@@ -587,7 +570,7 @@ function flushOutbox() {
 }
 
 async function drainOutbox() {
-  if (!client || sheetDenied || !currentConfig) return;
+  if (!outbox.length || !client || sheetDenied || !currentConfig) return;
   const config = currentConfig;
   while (outbox.length && client && !sheetDenied) {
     const item = outbox[0];
@@ -701,13 +684,8 @@ async function syncStoredPrints(config) {
   console.log(`fingerprint sheet rows=${planned.length} wrote=${wrote}`);
 }
 
-async function syncOnce(config) {
-  if (!client || sheetDenied) return;
-  await reloadStudents(config);
-}
-
 async function safeSync(config, gen) {
-  if (sheetDenied) return;
+  if (!outbox.length || sheetDenied) return;
   if (!client) {
     await prepareGoogle(config, gen);
     if (!client) return;
@@ -716,8 +694,6 @@ async function safeSync(config, gen) {
   try {
     await flushOutbox();
     if (sheetDenied || gen !== generation) return;
-    await exclusive(() => syncOnce(config));
-    if (sheetDenied) return;
     if (!outbox.length) publish({ syncNote: `Synced ${new Date().toLocaleTimeString()}` }, gen);
   } catch (err) {
     const offline = isOfflineError(err.message);
@@ -1041,6 +1017,7 @@ async function runLoop(config, gen) {
           if (isSheetPermissionError(err.message)) console.log(await failureNote(config, err));
         }
         await reloadStudents(config);
+        if (!outbox.length) publish({ syncNote: `Synced ${new Date().toLocaleTimeString()}` }, gen);
         void flushOutbox();
       });
     } catch (err) {
@@ -1060,7 +1037,7 @@ async function runLoop(config, gen) {
         await sleep(250);
         continue;
       }
-      if (sheetReady && !sheetDenied && Date.now() >= nextSync) {
+      if (outbox.length && sheetReady && !sheetDenied && Date.now() >= nextSync) {
         nextSync = Date.now() + config.syncIntervalSeconds * 1000;
         void safeSync(config, gen);
         if (gen !== generation) return;
@@ -1467,7 +1444,6 @@ async function createWindow() {
 function registerIpc() {
   ipcMain.handle("getState", () => state);
   ipcMain.handle("filter", (_event, query) => {
-    refreshCatalog();
     return fuzzyStudents(Object.values(cached), query).map(viewStudent);
   });
   ipcMain.handle("assign", async (_event, key) => {

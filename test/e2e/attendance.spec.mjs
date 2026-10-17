@@ -4,6 +4,21 @@ const id = "00 00 000 001";
 const checkboxWrite = (options) => options.data?.requests?.some((request) => request.updateCells?.start?.rowIndex >= 2);
 const logAppend = (options) => options.url.includes("AttendanceLog") && options.url.includes(":append");
 
+test("idle sync ticks and student searches do not reread the sheet", async ({ app }) => {
+  await app.ready();
+  const before = app.sheets.requests.length;
+  await app.page.waitForTimeout(2500);
+  expect(app.sheets.requests).toHaveLength(before);
+  app.enqueue({ template: "new-print", score: 0 });
+  await expect(app.page.locator("#pending")).toBeVisible();
+  const loaded = app.sheets.requests.length;
+  await app.page.locator("#search").fill("طالب");
+  await app.page.waitForTimeout(10500);
+  await app.page.locator("#search").fill("أحمد");
+  await app.page.waitForTimeout(500);
+  expect(app.sheets.requests).toHaveLength(loaded);
+});
+
 async function known(app, studentId = id) {
   await app.ready();
   await app.seedPrint(studentId);
