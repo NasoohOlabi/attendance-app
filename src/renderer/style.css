@@ -427,11 +427,19 @@ header button { -webkit-app-region: no-drag; }
 .ready .dot { animation: pulse 1.6s ease-in-out infinite; }
 .place {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 8px;
   margin-top: 8px;
 }
-.scene { display: block; flex: none; overflow: visible; }
+.scene {
+  display: block;
+  flex: none;
+  width: 240px;
+  max-width: 100%;
+  height: auto;
+  overflow: visible;
+}
 .body { fill: var(--card); stroke: #d5ccc2; stroke-width: 1.5; }
 .pad { fill: #f3efe8; stroke: #c9bfb4; stroke-width: 1.5; }
 .contact { fill: var(--green); opacity: 0; }
