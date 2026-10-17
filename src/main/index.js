@@ -487,23 +487,17 @@ async function writeQueuedPresent(config, item) {
   }
   if (!item.log) {
     if (config.logSpreadsheetId) {
-      try {
-        const log = await getSheetGrid(client, config.logSpreadsheetId, config.logSheetGid);
-        const header = log.rows[0] || ["الطالب", "حضور"];
-        const values = attendanceLogRow(item.studentId, when, header, item.studentName);
-        const stamp = item.time ? stampFromClock(when, item.time) : "";
-        if (stamp) values[logLayout(header).time] = stamp;
-        const hits = logHits(log.rows, item.studentId, when);
-        const hit = hits.at(-1);
-        if (!hit) {
-          await appendSheetRow(client, config.logSpreadsheetId, config.logSheetGid, values);
-        } else if (stamp && hit.stamp !== stamp) {
-          await writeSheetCell(client, config.logSpreadsheetId, log.title, `${columnLetter(logLayout(header).time)}${hit.rowNumber}`, stamp);
-        }
-      } catch (err) {
-        if (isOfflineError(err.message) || isSheetPermissionError(err.message)) throw err;
-        console.error(err.message);
-        item.logError = err.message;
+      const log = await getSheetGrid(client, config.logSpreadsheetId, config.logSheetGid);
+      const header = log.rows[0] || ["الطالب", "حضور"];
+      const values = attendanceLogRow(item.studentId, when, header, item.studentName);
+      const stamp = item.time ? stampFromClock(when, item.time) : "";
+      if (stamp) values[logLayout(header).time] = stamp;
+      const hits = logHits(log.rows, item.studentId, when);
+      const hit = hits.at(-1);
+      if (!hit) {
+        await appendSheetRow(client, config.logSpreadsheetId, config.logSheetGid, values);
+      } else if (stamp && hit.stamp !== stamp) {
+        await writeSheetCell(client, config.logSpreadsheetId, log.title, `${columnLetter(logLayout(header).time)}${hit.rowNumber}`, stamp);
       }
     }
     item.log = true;
@@ -577,13 +571,16 @@ async function drainOutbox() {
     activeWrite = item;
     try {
       const result = await writeQueued(config, item);
+      if (result === "ok") sheetPeople = overlayPresent(sheetPeople, [item], todayDay());
       outbox = outbox.filter((entry) => entry !== item);
       await saveOutbox();
       publish({ present: shownPresent(), syncNote: waitingNote() });
       if (result !== "ok") publish({ error: markDetail({ op: result, value: "حاضر" }) || "The sheet was not changed." });
-      if (item.logError) publish({ detail: markDetail({ op: "update", value: "حاضر", logError: item.logError }) });
     } catch (err) {
       console.error(err.message);
+      publishShown(item.kind === "present" && item.cell ? {
+        detail: "Marked present. The time log was not written.",
+      } : {});
       if (isSheetPermissionError(err.message)) {
         sheetDenied = true;
         const note = await failureNote(config, err);
@@ -685,7 +682,8 @@ async function syncStoredPrints(config) {
 }
 
 async function safeSync(config, gen) {
-  if (!outbox.length || sheetDenied) return;
+  if (!outbox.length) return;
+  sheetDenied = false;
   if (!client) {
     await prepareGoogle(config, gen);
     if (!client) return;
@@ -1037,7 +1035,7 @@ async function runLoop(config, gen) {
         await sleep(250);
         continue;
       }
-      if (outbox.length && sheetReady && !sheetDenied && Date.now() >= nextSync) {
+      if (outbox.length && sheetReady && Date.now() >= nextSync) {
         nextSync = Date.now() + config.syncIntervalSeconds * 1000;
         void safeSync(config, gen);
         if (gen !== generation) return;

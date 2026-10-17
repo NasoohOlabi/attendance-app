@@ -156,6 +156,57 @@ test("outbox log failure preserves present cell and reports the missing time log
   await expect(app.page.locator("#detail")).toContainText("Marked present. The time log was not written.");
   expect(app.sheets.grid("Info").rows[2][2]).toBe("حاضر");
   expect(app.sheets.grid("AttendanceLog").rows).toHaveLength(1);
+  await expect(app.page.locator("#today-count")).toHaveText("1");
+  await expect.poll(() => app.sheets.grid("AttendanceLog").rows.length).toBe(2);
+  await expect.poll(async () => (await app.outbox()).items.length).toBe(0);
+  expect(app.sheets.requests.filter(checkboxWrite)).toHaveLength(1);
+});
+
+for (const status of [400, 403, 500]) {
+  test(`outbox retains a failed log (${status}) across restart and retries automatically`, async ({ app }) => {
+    await app.ready();
+    await app.seedPrint();
+    const request = app.sheets.request.bind(app.sheets);
+    let failing = true;
+    let failures = 0;
+    app.sheets.request = async (options) => {
+      if (failing && logAppend(options)) {
+        failures++;
+        const error = new Error("log unavailable");
+        error.response = { status, data: { error: "log unavailable" } };
+        throw error;
+      }
+      return request(options);
+    };
+    await app.mark();
+    await expect.poll(() => failures).toBeGreaterThan(0);
+    await expect(app.page.locator("#today-count")).toHaveText("1");
+    await expect.poll(async () => (await app.outbox()).items[0]).toMatchObject({ studentId: id, cell: true, log: false });
+    const beforeRestart = failures;
+    await app.restart();
+    await expect(app.page.locator("#today-count")).toHaveText("1");
+    await expect.poll(() => failures).toBeGreaterThan(beforeRestart);
+    failing = false;
+    app.enqueue({ exitCode: 2, error: "timeout", events: [] });
+    await expect.poll(() => app.sheets.grid("AttendanceLog").rows.length).toBe(2);
+    await expect.poll(async () => (await app.outbox()).items.length).toBe(0);
+    await expect(app.page.locator("#today-count")).toHaveText("1");
+    expect(app.sheets.requests.filter(checkboxWrite)).toHaveLength(1);
+  });
+}
+
+test("outbox keeps the saved student visible while the sheet reload is delayed", async ({ app }) => {
+  await app.ready();
+  await app.seedPrint();
+  const append = app.block(logAppend);
+  await app.mark();
+  await append.waiting;
+  const reload = app.block((options) => options.url.includes("Info") && options.url.includes("/values/"));
+  append.release();
+  await reload.waiting;
+  await expect.poll(async () => (await app.outbox()).items.length).toBe(0);
+  await expect(app.page.locator("#today-count")).toHaveText("1");
+  reload.release();
 });
 
 test("outbox undo during a delayed cell write does not lose the next student's mark", async ({ app }) => {

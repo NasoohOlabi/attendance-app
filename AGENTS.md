@@ -57,7 +57,7 @@ Mosque grid: the `spreadsheetId` / `sheetGid` in `attendance.config.json`, tab t
 
 Time log: `logSpreadsheetId` / `logSheetGid` in `attendance.config.json`, tab `AttendanceLog` in the file titled Pages. Headers are `الطالب`, `إسم`, and `حضور`. New rows store the Marif id in `الطالب`, the roster name in `إسم`, and the Damascus stamp in `حضور`. The app does not add that name column; when it is missing, the row is still just the id and the stamp. Existing rows are left as they are. The window still shows the Arabic name by looking the id up on the roster. The timestamp is Asia/Damascus, day/month, no leading zeros, 24-hour clock, for example `3/10/2026 16:55:03` (`attendanceStamp` / `attendanceLogRow`). The log does not store the word حاضر.
 
-The log append runs after the cell write. If the append throws, the حاضر cell stays and the detail line is “Marked present. The time log was not written.”
+The log append runs after the cell write. If the append throws, the حاضر cell stays and the detail line is “Marked present. The time log was not written.” The mark stays in the local queue until the log succeeds, including API and permission failures. A retry skips a cell already written. Today's list keeps the mark when the queue drains, even if the following roster reload fails.
 
 Today’s list updates before Google answers. A mark, an undo, and a clock change land in `~/Masjid/attendance-outbox.json` and on the window immediately. The scan loop does not wait for the sheet. When the network is back, the queue writes the checkbox cell and the time-log row, then reloads. Undo of a mark that has not been written yet drops that queued mark. Undo after the write clears the date cell and leaves the checkbox, then deletes the matching time-log row for today, matched by id. Writing `""` through the values API leaves the checkbox and `COUNTA` still counts it, so the clear goes through `writeAttendanceCell`. Changing the clock keeps the Damascus date and rewrites that log row (`stampFromClock`). When the log has no time, the clock shows when the finger was scanned.
 
@@ -111,7 +111,7 @@ Symptom: the student is حاضر, and the UI says the time log was not written. 
 
 Cause: the Pages spreadsheet is not shared with the service account. The fingerprints tab on that same file is refused too.
 
-Fix: share that spreadsheet as Editor with the service-account email from the key file. The key file is gitignored. Do not keep retrying the append, and do not undo the حاضر cell when the append fails. A failed fingerprint append leaves the local `s-{id}.txt` in place.
+Fix: share that spreadsheet as Editor with the service-account email from the key file. The key file is gitignored. Attendance stays queued locally and retries on sync ticks, so sharing takes effect without restarting. Do not undo the حاضر cell when the append fails. A failed fingerprint append leaves the local `s-{id}.txt` in place.
 
 ### The place cue says to put a finger down before the sensor is open
 
