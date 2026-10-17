@@ -544,6 +544,8 @@ test("a mark shows up before the sheet answers, and an early undo cancels it", (
   assert.equal(queueAbsent(half, person)[0].log, false);
   assert.equal(isOfflineError("Google API GET https://sheets.googleapis.com failed (no status): getaddrinfo ENOTFOUND"), true);
   assert.equal(isOfflineError("The caller does not have permission"), false);
+  assert.equal(isOfflineError("Google Sheets is rate limited. Trying again in a minute."), true);
+  assert.equal(isOfflineError("Google API GET https://sheets.googleapis.com failed (429): rateLimitExceeded"), true);
 });
 
 test("undo and clock changes preserve an active write until it completes", () => {

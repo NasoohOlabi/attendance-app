@@ -13,6 +13,12 @@ test("the Sheets fixture serves real grid reads and restricts endpoints", async 
   const sheets = createSheets();
   const grid = await getSheetGrid(sheets, "attendance-test", 1);
   assert.equal(grid.title, "Info");
+  const before = sheets.requests.length;
+  const again = await getSheetGrid(sheets, "attendance-test", 1);
+  assert.equal(again.title, "Info");
+  const added = sheets.requests.slice(before).map((item) => item.url);
+  assert.equal(added.some((url) => url.includes("fields=sheets.properties")), false);
+  assert.equal(added.filter((url) => url.includes("/values/")).length, 1);
   assert.deepEqual(grid.rows[0].slice(0, 3), ["إسم كامل", "معرف", "12/10"]);
   assert.equal(grid.rows[2][1], "00 00 000 001");
   await assert.rejects(sheets.request({ url: "https://sheets.googleapis.com/v4/spreadsheets/attendance-test/unknown" }), /Unknown endpoint/);

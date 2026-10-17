@@ -95,6 +95,7 @@ const AR = {
   "Scanner not ready": "الماسح غير جاهز",
   Setup: "الإعداد",
   "Waiting to sync": "بانتظار المزامنة",
+  "Google Sheets is rate limited. Trying again in a minute.": "تجاوز جداول غوغل حد القراءة. المحاولة بعد دقيقة.",
   "Marked present.": "سُجّل حاضراً.",
   "Marked present. The time log was not written.": "سُجّل حاضراً. لم يُكتب سجل الوقت.",
   "Today's date column is missing, so the sheet was not changed.": "عمود تاريخ اليوم غير موجود، فلم يتغير الكشف.",

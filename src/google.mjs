@@ -25,10 +25,17 @@ export function isSheetPermissionError(message) {
 }
 
 /** A dropped network. Permission and bad requests stay errors. */
+export const SHEET_RATE_LIMIT = "Google Sheets is rate limited. Trying again in a minute.";
+
+const READ_PAUSE_MS = 60_000;
+let readsPausedUntil = 0;
+const sheetTitles = new Map();
+
 export function isOfflineError(message) {
   const text = String(message || "");
   if (isSheetPermissionError(text)) return false;
   if (/failed \((400|401|403|404)\)/.test(text)) return false;
+  if (text === SHEET_RATE_LIMIT || /failed \(429\)|rateLimitExceeded|RESOURCE_EXHAUSTED/i.test(text)) return true;
   return /ENOTFOUND|EAI_AGAIN|ENETUNREACH|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|EPIPE|fetch failed|socket hang up|network|offline|failed \(no status\)|failed \(502\)|failed \(503\)|failed \(504\)/i.test(
     text,
   );
@@ -60,15 +67,21 @@ export async function createGoogle(config, credentials = null) {
 }
 
 async function grequest(client, opts) {
+  const method = opts.method ?? "GET";
+  if (method === "GET" && Date.now() < readsPausedUntil) throw new Error(SHEET_RATE_LIMIT);
   try {
     const res = await client.request(opts);
     return res.data;
   } catch (err) {
     const status = err.response?.status;
+    if (status === 429) {
+      readsPausedUntil = Date.now() + READ_PAUSE_MS;
+      throw new Error(SHEET_RATE_LIMIT);
+    }
     const body = err.response?.data;
     const detail = typeof body === "string" ? body : JSON.stringify(body ?? err.message);
     throw new Error(
-      `Google API ${opts.method ?? "GET"} ${opts.url} failed (${status ?? "no status"}): ${String(detail).slice(0, 500)}`,
+      `Google API ${method} ${opts.url} failed (${status ?? "no status"}): ${String(detail).slice(0, 500)}`,
     );
   }
 }
@@ -81,13 +94,22 @@ function quoteTitle(title) {
   return `'${String(title).replaceAll("'", "''")}'`;
 }
 
-export async function getSheetGrid(client, spreadsheetId, sheetGid) {
+async function sheetTitle(client, spreadsheetId, sheetGid) {
+  const key = `${spreadsheetId}:${Number(sheetGid)}`;
+  const saved = sheetTitles.get(key);
+  if (saved) return saved;
   const meta = await grequest(client, {
     url: sheetsUrl(spreadsheetId, "?fields=sheets.properties(sheetId,title)"),
   });
   const sheet = (meta.sheets || []).find((item) => item.properties?.sheetId === Number(sheetGid));
   if (!sheet) throw new Error(`Sheet gid ${sheetGid} was not found.`);
   const title = sheet.properties.title;
+  sheetTitles.set(key, title);
+  return title;
+}
+
+export async function getSheetGrid(client, spreadsheetId, sheetGid) {
+  const title = await sheetTitle(client, spreadsheetId, sheetGid);
   const range = encodeURIComponent(`${quoteTitle(title)}!A:ZZ`);
   const data = await grequest(client, {
     url: sheetsUrl(spreadsheetId, `/values/${range}`),
