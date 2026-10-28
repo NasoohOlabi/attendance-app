@@ -2,7 +2,10 @@ import { access, copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, writeF
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, safeStorage } from "electron";
+import { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, safeStorage, session } from "electron";
+import { createBoutyClient } from "../bouty.mjs";
+import { createBoutyCredentials, createBoutyQueue, parseBoutyMapping } from "../bouty-storage.mjs";
+import { createBoutySync } from "../bouty-sync.mjs";
 import { createCredentialStore, credentialFile } from "../credentials.mjs";
 import { legacyUserDataPath, loadConfig, scannerExeInResources } from "../config.mjs";
 import { appLogFile, startAppLog } from "../log.mjs";
@@ -97,6 +100,53 @@ let sheetReported = false;
 let attendanceRows = [];
 let scannerReady = true;
 let scanFailStreak = 0;
+let boutyCredentials = null;
+let boutySync = null;
+let boutyEnabled = false;
+let boutySettings = { mapping: [], days: {}, presentStatusId: 1, absentStatusId: 2 };
+let boutyMessage = "";
+let boutyContext = null;
+
+function boutyPublic() {
+  return { enabled: boutyEnabled, message: boutyMessage, ...boutySettings };
+}
+
+function publishBouty(message = boutyMessage) {
+  boutyMessage = message;
+  publish({ bouty: boutyPublic() });
+}
+
+async function setupBouty() {
+  const dir = path.join(homedir(), "Masjid", "v1", "config");
+  const file = path.join(dir, "bouty-settings.json");
+  boutyCredentials = createBoutyCredentials({ file: path.join(dir, "bouty-account.enc"), encryption: safeStorage });
+  try {
+    const saved = JSON.parse(await readFile(file, "utf8"));
+    parseBoutyMapping(saved.mapping);
+    boutySettings = saved;
+  } catch (err) {
+    if (err.code !== "ENOENT") publishBouty("Bouty settings could not be read.");
+  }
+  try { boutyEnabled = Boolean(await boutyCredentials.read()); }
+  catch {
+    try { await access(path.join(dir, "bouty-account.enc")); boutyEnabled = true; } catch { boutyEnabled = false; }
+    publishBouty("Bouty account could not be opened.");
+  }
+  const browserSession = session.fromPartition("bouty-attendance");
+  const api = createBoutyClient((url, options) => browserSession.fetch(url, options));
+  const client = { ...api, async login(username, password) {
+    await browserSession.clearStorageData({ storages: ["cookies"] });
+    await api.login(username, password);
+  } };
+  boutySync = createBoutySync({
+    queue: createBoutyQueue(path.join(dir, "bouty-outbox.json")),
+    credentials: boutyCredentials,
+    client,
+    settings: async () => boutySettings,
+    onStatus: publishBouty,
+  });
+  return { file };
+}
 
 let state = {
   phase: "ready",
@@ -404,9 +454,13 @@ function publishShown(extra = {}) {
 }
 
 /** Show the mark now. The sheet write runs after this returns. */
-function acceptPresent(student) {
+async function acceptPresent(student) {
   const person = queuedFrom(student);
   if (!person.studentId) return { op: "missing-id" };
+  if (boutyEnabled && boutySync) {
+    try { await boutySync.enqueue(person.studentId, "present", person.at); void boutySync.sync(); }
+    catch { publishBouty("Bouty: attendance could not be queued."); }
+  }
   if (attendanceListed(shownPresent(), person)) return { op: "update", value: "حاضر" };
   outbox = queuePresent(outbox, person, activeWrite);
   if (person.rowNumber) rememberScan(person.rowNumber, new Date());
@@ -416,9 +470,13 @@ function acceptPresent(student) {
   return { op: "update", value: "حاضر" };
 }
 
-function acceptAbsent(rowNumber, logRow) {
+async function acceptAbsent(rowNumber, logRow) {
   const person = shownPresent().find((item) => item.rowNumber === Number(rowNumber));
   if (!person) return { ok: false, error: "That student is not on the sheet." };
+  if (boutyEnabled && boutySync) {
+    try { await boutySync.enqueue(person.studentId, "absent"); void boutySync.sync(); }
+    catch { return { ok: false, error: "Bouty: attendance could not be queued." }; }
+  }
   outbox = queueAbsent(outbox, { ...person, at: new Date().toISOString(), logRow }, activeWrite);
   forgetScan(person.rowNumber);
   saveOutbox().catch((err) => console.error(err.message));
@@ -881,7 +939,7 @@ async function handleCapture(config, result, body, gen, scanImage) {
     const student = decision.student;
     const who = student.studentName || student.studentId;
     console.log(`matched ${who || student.templateFile}`);
-    const plan = acceptPresent(student);
+    const plan = await acceptPresent(student);
     const extra = markDetail(plan);
     const detail = [`Matched ${who}`, extra].filter(Boolean).join(" ");
     publish(
@@ -1440,6 +1498,35 @@ async function createWindow() {
 }
 
 function registerIpc() {
+  ipcMain.handle("saveBouty", async (_event, input) => {
+    try {
+      if (!boutyContext) throw new Error("Bouty is still starting.");
+      const settings = JSON.parse(String(input?.settings || ""));
+      parseBoutyMapping(settings.mapping);
+      if (!settings.days || Array.isArray(settings.days) || typeof settings.days !== "object" ||
+          !Number.isSafeInteger(settings.presentStatusId) || settings.presentStatusId < 1 ||
+          !Number.isSafeInteger(settings.absentStatusId) || settings.absentStatusId < 1 ||
+          Object.entries(settings.days).some(([date, id]) => !/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isSafeInteger(id) || id < 1)) {
+        throw new Error("Invalid Bouty settings.");
+      }
+      if (input?.password) {
+        const checkSession = session.fromPartition("bouty-login-check");
+        await checkSession.clearStorageData({ storages: ["cookies"] });
+        const checkClient = createBoutyClient((url, options) => checkSession.fetch(url, options));
+        await checkClient.login(input.username, input.password);
+        await boutyCredentials.save({ username: input.username, password: input.password });
+        boutyEnabled = true;
+      } else if (!boutyEnabled) throw new Error("Enter the Bouty username and password.");
+      const temporary = `${boutyContext.file}.tmp`;
+      await mkdir(path.dirname(boutyContext.file), { recursive: true });
+      await writeFile(temporary, JSON.stringify(settings), { mode: 0o600 });
+      await rename(temporary, boutyContext.file);
+      boutySettings = settings;
+      publishBouty("");
+      void boutySync.sync();
+      return { ok: true };
+    } catch (error) { return { ok: false, error: error.message }; }
+  });
   ipcMain.handle("getState", () => state);
   ipcMain.handle("filter", (_event, query) => {
     return fuzzyStudents(Object.values(cached), query).map(viewStudent);
@@ -1644,8 +1731,12 @@ if (!app.requestSingleInstanceLock()) {
       Menu.setApplicationMenu(null);
       registerIpc();
       await loadScanTimes();
+      boutyContext = await setupBouty();
       await createWindow();
       await startLoop();
+      publishBouty();
+      void boutySync.sync();
+      setInterval(() => { if (boutySync) void boutySync.sync(); }, 60000).unref();
     } catch (err) {
       console.error(err);
       publish({

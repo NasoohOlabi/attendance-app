@@ -667,6 +667,7 @@ input[type="text"], input[type="search"] {
 .settings-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
 .settings-tabs [aria-selected="true"] { background: #ded6cb; color: #221e19; }
 .settings-page { display: flex; flex-direction: column; gap: 12px; }
+  #bouty-settings { width: 100%; min-height: 180px; font-family: monospace; }
 .account-card { padding: 18px; border: 1px solid #d8d0c5; border-radius: 12px; background: rgba(255,255,255,.4); }
 .account-card h2 { margin: 0 0 8px; font-size: 20px; }
 .account-card .primary { margin-block: 12px; }

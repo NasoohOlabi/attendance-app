@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createBoutyClient } from "../../src/bouty.mjs";
 import { createBoutyCredentials, createBoutyQueue, parseBoutyMapping } from "../../src/bouty-storage.mjs";
+import { createBoutySync } from "../../src/bouty-sync.mjs";
 import { mkdtemp, readFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
@@ -76,4 +77,46 @@ test("student mapping refuses duplicate students and enrolments", () => {
   assert.equal(parseBoutyMapping([{ studentId: "00 00 000 001", enrollmentId: 7 }]).size, 1);
   assert.throws(() => parseBoutyMapping([{ studentId: "00 00 000 001", enrollmentId: 7 }, { studentId: "00 00 000 001", enrollmentId: 8 }]), /Duplicate/);
   assert.throws(() => parseBoutyMapping([{ studentId: "00 00 000 001", enrollmentId: 7 }, { studentId: "00 00 000 002", enrollmentId: 7 }]), /Duplicate/);
+});
+
+test("Bouty scans remain queued until their day and enrolment are mapped", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "bouty-sync-"));
+  const queue = createBoutyQueue(path.join(dir, "queue.json"));
+  const calls = [], messages = [];
+  let days = {};
+  const worker = createBoutySync({
+    queue, credentials: { read: async () => ({ username: "user", password: "secret" }) },
+    client: { login: async () => {}, mark: async (entry) => calls.push(entry) },
+    settings: async () => ({ mapping: [{ studentId: "00 00 000 001", enrollmentId: 7 }], days, presentStatusId: 1, absentStatusId: 2 }),
+    onStatus: (message) => messages.push(message),
+  });
+  await worker.enqueue("00 00 000 001", "present", "2026-10-31T06:15:00Z");
+  await worker.sync();
+  assert.equal((await queue.list()).length, 1);
+  assert.match(messages.at(-1), /missing/);
+  days = { "2026-10-31": 9 };
+  await worker.sync();
+  assert.equal((await queue.list()).length, 0);
+  assert.equal(calls[0].dayId, 9);
+  assert.equal(calls[0].enrollmentId, 7);
+  assert.equal(calls[0].changedAt, "2026-10-31T06:15:00Z");
+});
+
+test("an uncertain Bouty write is retried with the same operation ID", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "bouty-retry-"));
+  const queue = createBoutyQueue(path.join(dir, "queue.json"));
+  const ids = [];
+  let fail = true;
+  const sync = createBoutySync({ queue,
+    credentials: { read: async () => ({ username: "user", password: "secret" }) },
+    settings: async () => ({ mapping: [{ studentId: "00 00 000 001", enrollmentId: 7 }], days: { "2026-10-31": 9 }, presentStatusId: 1 }),
+    client: { login: async () => {}, mark: async (item) => { ids.push(item.operationId); if (fail) throw new Error(); } },
+  });
+  await sync.enqueue("00 00 000 001", "present", "2026-10-31T06:15:00Z");
+  await sync.sync();
+  assert.equal((await queue.list()).length, 1);
+  fail = false;
+  await sync.sync();
+  assert.equal((await queue.list()).length, 0);
+  assert.equal(ids[0], ids[1]);
 });

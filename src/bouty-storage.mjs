@@ -32,6 +32,8 @@ export function parseBoutyMapping(rows) {
 
 /** Credentials are encrypted with the same Windows account as the app. */
 export function createBoutyCredentials({ file, encryption, platform = process.platform }) {
+  let tail = Promise.resolve();
+  function serial(fn) { const run = tail.then(fn, fn); tail = run.catch(() => {}); return run; }
   async function available() {
     if (platform !== "win32" || !await encryption.isAsyncEncryptionAvailable()) throw new Error("Windows secure storage is unavailable.");
   }
@@ -44,8 +46,8 @@ export function createBoutyCredentials({ file, encryption, platform = process.pl
     await atomicWrite(file, encrypted);
   }
   return {
-    save,
-    async read() {
+    save: (account) => serial(() => save(account)),
+    read: () => serial(async () => {
       let bytes;
       try { bytes = await readFile(file); } catch (err) { if (err.code === "ENOENT") return null; throw err; }
       await available();
@@ -56,7 +58,7 @@ export function createBoutyCredentials({ file, encryption, platform = process.pl
         if (decrypted.shouldReEncrypt) await save(account);
         return account;
       } catch { throw new Error("The saved Bouty account cannot be opened by this Windows user."); }
-    },
+    }),
   };
 }
 

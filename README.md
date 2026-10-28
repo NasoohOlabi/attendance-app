@@ -32,6 +32,21 @@ The sheet GID is the numeric `gid` in a tab's URL. The spreadsheet ID is the ide
 
 ## Run the installed app
 
+### Bouty attendance
+
+In Settings → Bouty, enter the Bouty username and password and save. They are encrypted for the current Windows account. Configure the JSON with existing attendance-day IDs by date and an explicit mapping from each roster Marif ID to the corresponding Bouty enrolment ID:
+
+```json
+{
+  "mapping": [{ "studentId": "00 00 000 001", "enrollmentId": 123 }],
+  "days": { "2026-10-31": 456 },
+  "presentStatusId": 1,
+  "absentStatusId": 2
+}
+```
+
+These numbers are examples, not actual IDs. Create the day and its group sessions on Bouty first, and use the ID in the attendance day URL. Verify enrolment and status IDs for the actual course before mapping. Keep earlier date entries until their queued scans have synced. The app does not create attendance days or groups; adding a group on Bouty can mark all its students present, so review its defaults. A missing mapping, missing day, login failure, or network failure leaves scans in the separate Bouty queue and shows a status message. Removing a student from today's list queues the configured Absent status. Fingerprints are not sent to Bouty. The request includes the scan timestamp as `changed_at`, but Bouty entry-time persistence has not been verified.
+
 Open Settings → Service account → Import JSON to import or replace your Google account. Set the roster fields on the General page. Advanced log/fingerprint settings can be supplied in `%APPDATA%\attendance-service\attendance.config.json`. That legacy profile name is retained so upgrades keep existing settings and renderer preferences. The display name remains Masjid Attendance.
 
 The imported account is encrypted under `~/Masjid/v1/config/service-account.enc`, beside the fingerprint store. Electron's asynchronous safeStorage API uses Windows DPAPI to protect the encryption key for your Windows account. There is no separate plaintext encryption-key file. The decrypted key stays in the main process and is not sent to the page or written to a temporary plaintext file. The original downloaded JSON is left untouched.

@@ -203,6 +203,12 @@ function fillConfig(state) {
   document.querySelector("#cfg-gid").value = cfg.sheetGid ?? "";
   document.querySelector("#cfg-exe").value = cfg.zk4500Cli || "";
   document.querySelector("#cfg-dir").textContent = state.fingerprintDir || cfg.fingerprintDir || "";
+  const bouty = state.bouty || {};
+  document.querySelector("#bouty-settings").value = JSON.stringify({
+    mapping: bouty.mapping || [], days: bouty.days || {}, presentStatusId: bouty.presentStatusId || 1, absentStatusId: bouty.absentStatusId || 2,
+  }, null, 2);
+  document.querySelector("#bouty-user").value = "";
+  document.querySelector("#bouty-password").value = "";
   cancel.hidden = !state.canCloseSettings;
   chooseSettingsPage("general");
 }
@@ -210,6 +216,7 @@ function fillConfig(state) {
 function chooseSettingsPage(page) {
   document.querySelector("#settings-general").hidden = page !== "general";
   document.querySelector("#settings-account").hidden = page !== "account";
+  document.querySelector("#settings-bouty").hidden = page !== "bouty";
   document.querySelector("#save").hidden = page !== "general";
   for (const tab of document.querySelectorAll("[data-settings-page]")) {
     tab.setAttribute("aria-selected", String(tab.dataset.settingsPage === page));
@@ -443,6 +450,7 @@ function renderProfile(fields) {
 function render(state) {
   lastState = state;
   renderServiceAccount(state);
+  document.querySelector("#bouty-status").textContent = translate(state.bouty?.message || (state.bouty?.enabled ? "Bouty account saved." : "Bouty is not configured."));
   const mode = screenForPhase(state.phase);
   const enteredPicker = mode === "pending" && !picker;
   const enteredConfig = mode === "config" && !configOpen;
@@ -512,7 +520,7 @@ function render(state) {
   }
   error.hidden = !state.error;
   error.textContent = translate(state.error || "");
-  sync.textContent = translate(state.syncNote || "");
+  sync.textContent = [state.syncNote, state.bouty?.message].filter(Boolean).map(translate).join(" · ");
 }
 
 search.addEventListener("input", () => refreshList());
@@ -604,6 +612,16 @@ document.querySelector("#save").addEventListener("click", async () => {
 for (const tab of document.querySelectorAll("[data-settings-page]")) {
   tab.addEventListener("click", () => chooseSettingsPage(tab.dataset.settingsPage));
 }
+document.querySelector("#save-bouty").addEventListener("click", async () => {
+  const button = document.querySelector("#save-bouty");
+  button.disabled = true;
+  try {
+    const result = await window.attendance.saveBouty({ username: document.querySelector("#bouty-user").value,
+      password: document.querySelector("#bouty-password").value, settings: document.querySelector("#bouty-settings").value });
+    if (!result?.ok) { error.hidden = false; error.textContent = translate(result?.error || "Bouty settings could not be saved."); }
+    else { document.querySelector("#bouty-password").value = ""; error.hidden = true; }
+  } finally { button.disabled = false; }
+});
 document.querySelector("#import-account").addEventListener("click", async () => {
   importingAccount = true;
   renderServiceAccount(lastState || {});

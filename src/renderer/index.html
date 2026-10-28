@@ -95,6 +95,7 @@
         <nav class="settings-tabs" role="tablist" aria-label="Settings">
           <button id="settings-general-tab" class="secondary" type="button" role="tab" aria-controls="settings-general" aria-selected="true" data-settings-page="general" data-i18n="General">General</button>
           <button id="settings-account-tab" class="secondary" type="button" role="tab" aria-controls="settings-account" aria-selected="false" data-settings-page="account" data-i18n="Service account">Service account</button>
+            <button id="settings-bouty-tab" class="secondary" type="button" role="tab" aria-controls="settings-bouty" aria-selected="false" data-settings-page="bouty" data-i18n="Bouty">Bouty</button>
         </nav>
         <div id="settings-general" class="settings-page" role="tabpanel" aria-labelledby="settings-general-tab">
         <div class="field">
@@ -138,6 +139,15 @@
             <p class="detail" data-i18n="The original file is not deleted. Share your sheets as Editor with the account email.">The original file is not deleted. Share your sheets as Editor with the account email.</p>
             <p class="detail"><span data-i18n="Encrypted account location">Encrypted account location</span><br /><span id="account-location" dir="ltr"></span></p>
           </div>
+        </div>
+        <div id="settings-bouty" class="settings-page" role="tabpanel" aria-labelledby="settings-bouty-tab" hidden>
+          <p class="detail" data-i18n="Fingerprints are not sent to Bouty.">Fingerprints are not sent to Bouty.</p>
+          <label class="field"><span data-i18n="Bouty username">Bouty username</span><input id="bouty-user" type="text" autocomplete="username" dir="ltr" /></label>
+          <label class="field"><span data-i18n="Bouty password">Bouty password</span><input id="bouty-password" type="password" autocomplete="new-password" dir="ltr" /></label>
+          <label class="field"><span data-i18n="Bouty attendance settings">Bouty attendance settings</span><textarea id="bouty-settings" rows="10" dir="ltr" spellcheck="false"></textarea></label>
+          <p class="detail" data-i18n="Set each date to its existing attendance day ID and map each roster ID to its enrolment ID. Keep earlier dates until their queued scans are sent.">Set each date to its existing attendance day ID and map each roster ID to its enrolment ID. Keep earlier dates until their queued scans are sent.</p>
+          <p id="bouty-status" role="status"></p>
+          <button id="save-bouty" class="primary" type="button" data-i18n="Save Bouty settings">Save Bouty settings</button>
         </div>
         <div class="actions">
           <button id="save" class="primary" type="button" data-i18n="Save">Save</button>

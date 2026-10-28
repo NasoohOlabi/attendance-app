@@ -15,7 +15,7 @@ export function createBoutyClient(fetch) {
   let userId = "";
 
   async function page(path, options = {}) {
-    const response = await fetch(`${ORIGIN}${path}`, { ...options, redirect: "follow", signal: AbortSignal.timeout(30000) });
+    const response = await fetch(`${ORIGIN}${path}`, { ...options, credentials: "include", redirect: options.method === "POST" ? "error" : "follow", signal: AbortSignal.timeout(30000) });
     if (!response.ok || new URL(response.url).origin !== ORIGIN) throw new Error("Bouty connection failed.");
     return response;
   }
@@ -30,6 +30,7 @@ export function createBoutyClient(fetch) {
       if (!token) throw new Error("Bouty login form changed.");
       const response = await fetch(`${ORIGIN}/login`, {
         method: "POST",
+        credentials: "include",
         redirect: "manual",
         signal: AbortSignal.timeout(30000),
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
