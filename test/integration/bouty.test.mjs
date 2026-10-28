@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createBoutyClient } from "../../src/bouty.mjs";
-import { createBoutyCredentials, createBoutyQueue } from "../../src/bouty-storage.mjs";
+import { createBoutyCredentials, createBoutyQueue, parseBoutyMapping } from "../../src/bouty-storage.mjs";
 import { mkdtemp, readFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
@@ -70,4 +70,10 @@ test("Bouty credentials are encrypted and the independent queue survives concurr
   await Promise.all([queue.enqueue({ id: "one" }), queue.enqueue({ id: "two" })]);
   await Promise.all([queue.remove("one"), queue.enqueue({ id: "three" })]);
   assert.deepEqual(await createBoutyQueue(queueFile).list(), [{ id: "two" }, { id: "three" }]);
+});
+
+test("student mapping refuses duplicate students and enrolments", () => {
+  assert.equal(parseBoutyMapping([{ studentId: "00 00 000 001", enrollmentId: 7 }]).size, 1);
+  assert.throws(() => parseBoutyMapping([{ studentId: "00 00 000 001", enrollmentId: 7 }, { studentId: "00 00 000 001", enrollmentId: 8 }]), /Duplicate/);
+  assert.throws(() => parseBoutyMapping([{ studentId: "00 00 000 001", enrollmentId: 7 }, { studentId: "00 00 000 002", enrollmentId: 7 }]), /Duplicate/);
 });
