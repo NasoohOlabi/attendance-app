@@ -1,6 +1,6 @@
 # Masjid Attendance
 
-Windows attendance app for a mosque roster in Google Sheets. A ZK4500 fingerprint scan identifies a student by their Marif ID and marks today's checkbox with `حاضر`. The app supports Arabic, enrollment, attendance undo, time corrections, and a persistent queue for network outages.
+Windows attendance app for a mosque roster. A ZK4500 fingerprint scan identifies a student by their Marif ID and records attendance on the selected daily sheet or Bouty website. The Pages spreadsheet stores timestamps and fingerprint templates in both modes. The app supports Arabic, enrollment, attendance undo, time corrections, and a persistent queue for network outages.
 
 ## Set up development
 
@@ -31,6 +31,25 @@ The time-log tab uses `الطالب` for the ID and `حضور` for the Damascus 
 The sheet GID is the numeric `gid` in a tab's URL. The spreadsheet ID is the identifier between `/d/` and `/edit`.
 
 ## Run the installed app
+
+### Attendance destination
+
+In Settings → General, choose either the daily attendance sheet or the Bouty website. Both choices continue to use the Pages spreadsheet for attendance timestamps and fingerprint templates. In Bouty mode, the daily attendance grid is not read or written: the fingerprint picker searches Bouty, and a matched student's displayed name and details come from Bouty. The local fingerprint index keeps the ID and a name hint for looking up an existing print. If the site cannot verify the identity, the app shows the ID and an unavailable message instead of old sheet details.
+
+In Settings → Bouty, enter the Bouty username and password and save. They are encrypted for the current Windows account. The app looks up the student by a name hint and the source ID in their Bouty notes, treating the roster's zero-padded ID as the corresponding numeric source ID. It then finds their active enrolment in the default course and checks that the enrolment is in that day's group. If a student, enrolment or day is missing or ambiguous, the scan stays queued. The roster and the Bouty student notes must contain the same source ID, and an attendance day with group sessions must already exist on the site. For new fingerprints, search the site's students by name; entries without a unique source ID are not offered for assignment.
+
+The advanced settings allow explicit IDs when automatic lookup is unavailable:
+
+```json
+{
+  "mapping": [{ "studentId": "00 00 000 001", "enrollmentId": 123 }],
+  "days": { "2026-10-31": 456 },
+  "presentStatusId": 1,
+  "absentStatusId": 2
+}
+```
+
+These numbers are examples, not actual IDs. Create the day and its group sessions on Bouty first. Verify enrolment and status IDs before overriding automatic lookup, and keep earlier date entries until their queued scans have synced. The app does not create attendance days or groups; adding a group on Bouty can mark all its students present, so review its defaults. A missing mapping, missing day, login failure, or network failure leaves scans in the separate Bouty queue and shows a status message. Removing a student from today's list queues an Absent status. Fingerprints are not sent to Bouty. The request includes the scan timestamp as `changed_at`, but Bouty entry-time persistence has not been verified.
 
 Open Settings → Service account → Import JSON to import or replace your Google account. Set the roster fields on the General page. Advanced log/fingerprint settings can be supplied in `%APPDATA%\attendance-service\attendance.config.json`. That legacy profile name is retained so upgrades keep existing settings and renderer preferences. The display name remains Masjid Attendance.
 

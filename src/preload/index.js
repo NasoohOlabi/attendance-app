@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("attendance", {
   discardScans: () => ipcRenderer.invoke("discardScans"),
   finishEnroll: () => ipcRenderer.invoke("finishEnroll"),
   saveConfig: (config) => ipcRenderer.invoke("saveConfig", config),
+  saveBouty: (config) => ipcRenderer.invoke("saveBouty", config),
   importServiceAccount: () => ipcRenderer.invoke("importServiceAccount"),
   pickFile: (kind) => ipcRenderer.invoke("pickFile", kind),
   openSettings: () => ipcRenderer.invoke("openSettings"),
