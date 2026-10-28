@@ -199,8 +199,13 @@ async function choose(key) {
 
 function fillConfig(state) {
   const cfg = state.config || {};
+  document.querySelector("#cfg-destination").value = cfg.attendanceDestination || "sheet";
+  showDestinationFields();
   document.querySelector("#cfg-sheet").value = cfg.spreadsheetId || "";
   document.querySelector("#cfg-gid").value = cfg.sheetGid ?? "";
+  document.querySelector("#cfg-log-sheet").value = cfg.logSpreadsheetId || "";
+  document.querySelector("#cfg-log-gid").value = cfg.logSheetGid ?? "";
+  document.querySelector("#cfg-print-gid").value = cfg.fingerprintSheetGid ?? "";
   document.querySelector("#cfg-exe").value = cfg.zk4500Cli || "";
   document.querySelector("#cfg-dir").textContent = state.fingerprintDir || cfg.fingerprintDir || "";
   const bouty = state.bouty || {};
@@ -212,6 +217,14 @@ function fillConfig(state) {
   cancel.hidden = !state.canCloseSettings;
   chooseSettingsPage("general");
 }
+
+function showDestinationFields() {
+  const hidden = document.querySelector("#cfg-destination").value === "bouty";
+  document.querySelector("#sheet-id-field").hidden = hidden;
+  document.querySelector("#sheet-gid-field").hidden = hidden;
+}
+
+document.querySelector("#cfg-destination").addEventListener("change", showDestinationFields);
 
 function chooseSettingsPage(page) {
   document.querySelector("#settings-general").hidden = page !== "general";
@@ -599,8 +612,12 @@ document.querySelector("#save").addEventListener("click", async () => {
   const save = document.querySelector("#save");
   save.disabled = true;
   const result = await window.attendance.saveConfig({
+    attendanceDestination: document.querySelector("#cfg-destination").value,
     spreadsheetId: document.querySelector("#cfg-sheet").value,
     sheetGid: document.querySelector("#cfg-gid").value,
+    logSpreadsheetId: document.querySelector("#cfg-log-sheet").value,
+    logSheetGid: document.querySelector("#cfg-log-gid").value,
+    fingerprintSheetGid: document.querySelector("#cfg-print-gid").value,
     zk4500Cli: document.querySelector("#cfg-exe").value,
   });
   save.disabled = false;

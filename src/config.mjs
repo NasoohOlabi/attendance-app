@@ -89,6 +89,7 @@ export function loadConfig(options = {}) {
   }
 
   return {
+    attendanceDestination: file.attendanceDestination === "bouty" ? "bouty" : "sheet",
     serviceAccountJson,
     spreadsheetId: filled(env.SPREADSHEET_ID) || filled(file.spreadsheetId) || DEFAULTS.spreadsheetId,
     sheetGid: pickGid(env.SHEET_GID, file.sheetGid),
@@ -112,10 +113,13 @@ export function loadConfig(options = {}) {
 export function requireGoogleConfig(config) {
   const missing = [];
   if (!config.serviceAccountJson) missing.push("serviceAccountJson / GOOGLE_SERVICE_ACCOUNT_JSON");
-  if (!config.spreadsheetId) missing.push("spreadsheetId / SPREADSHEET_ID");
-  if (config.sheetGid === undefined || config.sheetGid === null || config.sheetGid === "") {
+  if (config.attendanceDestination !== "bouty" && !config.spreadsheetId) missing.push("spreadsheetId / SPREADSHEET_ID");
+  if (config.attendanceDestination !== "bouty" && (config.sheetGid === undefined || config.sheetGid === null || config.sheetGid === "")) {
     missing.push("sheetGid / SHEET_GID");
   }
+  if (config.attendanceDestination === "bouty" && !config.logSpreadsheetId) missing.push("logSpreadsheetId / LOG_SPREADSHEET_ID");
+  if (config.attendanceDestination === "bouty" && (config.logSheetGid === null || config.logSheetGid === undefined)) missing.push("logSheetGid / LOG_SHEET_GID");
+  if (config.attendanceDestination === "bouty" && (config.fingerprintSheetGid === null || config.fingerprintSheetGid === undefined)) missing.push("fingerprintSheetGid / FINGERPRINT_SHEET_GID");
   if (!config.fingerprintDir) missing.push("fingerprintDir / FINGERPRINT_DIR");
   if (missing.length) {
     throw new Error(

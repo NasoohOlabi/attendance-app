@@ -3,6 +3,7 @@ import test from "node:test";
 import { createBoutyClient } from "../../src/bouty.mjs";
 import { createBoutyCredentials, createBoutyQueue, parseBoutyMapping } from "../../src/bouty-storage.mjs";
 import { createBoutySync } from "../../src/bouty-sync.mjs";
+import { createBoutyResolver } from "../../src/bouty-resolve.mjs";
 import { mkdtemp, readFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
@@ -119,4 +120,71 @@ test("an uncertain Bouty write is retried with the same operation ID", async () 
   await sync.sync();
   assert.equal((await queue.list()).length, 0);
   assert.equal(ids[0], ids[1]);
+});
+
+test("Bouty automatically resolves the student and day from a queued scan", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "bouty-auto-"));
+  const queue = createBoutyQueue(path.join(dir, "queue.json"));
+  const calls = [];
+  const sync = createBoutySync({ queue,
+    credentials: { read: async () => ({ username: "user", password: "secret" }) },
+    settings: async () => ({ mapping: [], days: {} }),
+    client: { login: async () => {}, resolve: async (query) => { calls.push(query); return { dayId: 9, enrollmentId: 7, statusId: 1 }; },
+      mark: async (item) => calls.push(item) },
+  });
+  await sync.enqueue("001", "present", "2026-10-31T06:15:00Z", "One");
+  await sync.sync();
+  assert.deepEqual(calls[0], { studentId: "001", studentName: "One", date: "2026-10-31", kind: "present" });
+  assert.equal(calls[1].enrollmentId, 7);
+  assert.equal((await queue.list()).length, 0);
+});
+
+test("an ambiguous student stays queued without blocking other students", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "bouty-blocked-"));
+  const queue = createBoutyQueue(path.join(dir, "queue.json")), sent = [], messages = [];
+  const sync = createBoutySync({ queue, credentials: { read: async () => ({ username: "user", password: "secret" }) },
+    settings: async () => ({ mapping: [], days: {} }), onStatus: (message) => messages.push(message),
+    client: { login: async () => {}, resolve: async ({ studentId }) => {
+      if (studentId === "001") throw new Error("Bouty student identity is missing or ambiguous.");
+      return { dayId: 9, enrollmentId: 7, statusId: 1 };
+    }, mark: async (item) => sent.push(item) },
+  });
+  await sync.enqueue("001", "present", "2026-10-31T06:15:00Z", "One");
+  await sync.enqueue("001", "absent", "2026-10-31T06:16:00Z", "One");
+  await sync.enqueue("002", "present", "2026-10-31T06:17:00Z", "Two");
+  await sync.sync();
+  assert.equal(sent.length, 1);
+  assert.equal((await queue.list()).length, 2);
+  assert.match(messages.at(-1), /ambiguous/);
+});
+
+test("Bouty resolves the exact source ID, active enrolment, day and group without guessing by name", async () => {
+  const snapshot = (name, data) => JSON.stringify({ memo: { name }, data });
+  const escaped = (text) => text.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
+  const pageHtml = (name, data, inner = "") => `<script data-update-uri="https://albouty.saas.hassiba.tech/livewire/update"></script><div wire:snapshot="${escaped(snapshot(name, data))}">${inner}</div>`;
+  const rows = '<button wire:click="edit(11)"></button><button wire:click="edit(12)"></button>';
+  const student = pageHtml("students.index", {}, rows);
+  const enrollments = pageHtml("enrollments.index", { courseFilter: "1" }, '<button wire:click="edit(31)"></button>');
+  const attendance = pageHtml("attendance.index", { course_id: "1" });
+  const dayRows = '<select id="attendance-day-course"><option value="1">Winter</option></select><table><tr><td>31-10-2026</td><td>Winter</td><td><a href="https://albouty.saas.hassiba.tech/attendance/days/students/22">open</a></td></tr></table>';
+  const calls = [];
+  const page = async (url, opts = {}) => {
+    calls.push(url);
+    if (url === "/students") return { text: async () => student };
+    if (url === "/enrollments") return { text: async () => enrollments };
+    if (url === "/attendance") return { text: async () => attendance };
+    if (url === "/attendance/days/students/22") return { text: async () => '<a href="https://albouty.saas.hassiba.tech/student-attendance/groups/8">group</a>' };
+    if (url === "/student-attendance/groups/8") return { text: async () => '<table><tr data-attendance-type="student" data-attendance-entity-id="31"><td><select><option value="1">Present</option><option value="2">Absent</option></select></td></tr></table>' };
+    const body = JSON.parse(opts.body), request = body.components[0], state = JSON.parse(request.snapshot);
+    const method = request.calls[0]?.method, id = request.calls[0]?.params[0];
+    if (state.memo.name === "students.index" && method === "edit") state.data.notes = `معرف المصدر: ${id === 11 ? "002" : "001"}`;
+    if (state.memo.name === "enrollments.index" && method === "edit") Object.assign(state.data, { student_id: 12, status: "active" });
+    const html = state.memo.name === "students.index" ? student : state.memo.name === "enrollments.index" ? enrollments : pageHtml("attendance.index", state.data, dayRows);
+    return { json: async () => ({ components: [{ snapshot: JSON.stringify(state), effects: { html } }] }) };
+  };
+  const resolve = createBoutyResolver({ page, csrf: () => "token" });
+  assert.deepEqual(await resolve({ studentId: "001", studentName: "Same Name", date: "2026-10-31", kind: "present" }), { dayId: 22, enrollmentId: 31, statusId: 1 });
+  assert.deepEqual(await resolve({ studentId: "001", studentName: "Same Name", date: "2026-10-31", kind: "absent" }), { dayId: 22, enrollmentId: 31, statusId: 2 });
+  await assert.rejects(resolve({ studentId: "003", studentName: "Same Name", date: "2026-10-31", kind: "present" }), /identity is missing/);
+  assert.equal(calls.includes("/attendance/offline-sync"), false);
 });

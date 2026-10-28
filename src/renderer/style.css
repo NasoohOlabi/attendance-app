@@ -112,7 +112,7 @@ body {
   background: var(--bg);
   color: var(--ink);
 }
-button, input { font: inherit; color: inherit; }
+button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
 :focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 .app {
@@ -566,7 +566,7 @@ label { font-size: 13px; color: var(--muted); }
   display: block;
   padding-inline: 12px;
 }
-input[type="text"], input[type="search"] {
+input[type="text"], input[type="search"], input[type="password"], select, textarea {
   width: 100%;
   border: 1px solid var(--line);
   background: var(--card);

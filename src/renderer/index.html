@@ -98,6 +98,9 @@
             <button id="settings-bouty-tab" class="secondary" type="button" role="tab" aria-controls="settings-bouty" aria-selected="false" data-settings-page="bouty" data-i18n="Bouty">Bouty</button>
         </nav>
         <div id="settings-general" class="settings-page" role="tabpanel" aria-labelledby="settings-general-tab">
+        <label class="field"><span data-i18n="Attendance destination">Attendance destination</span>
+          <select id="cfg-destination"><option value="sheet" data-i18n="Daily attendance sheet">Daily attendance sheet</option><option value="bouty" data-i18n="Bouty website">Bouty website</option></select>
+        </label>
         <div class="field">
           <span id="language-label" data-i18n="Language">Language</span>
           <div class="lang" role="group" dir="ltr" aria-labelledby="language-label">
@@ -114,12 +117,15 @@
             <button class="secondary" type="button" data-font="naskh" aria-pressed="false">Noto Naskh Arabic</button>
           </div>
         </div>
-        <label class="field"><span data-i18n="Spreadsheet id">Spreadsheet id</span>
+        <label id="sheet-id-field" class="field"><span data-i18n="Spreadsheet id">Spreadsheet id</span>
           <input id="cfg-sheet" type="text" dir="ltr" />
         </label>
-        <label class="field"><span data-i18n="Sheet gid">Sheet gid</span>
+        <label id="sheet-gid-field" class="field"><span data-i18n="Sheet gid">Sheet gid</span>
           <input id="cfg-gid" type="text" inputmode="numeric" dir="ltr" />
         </label>
+        <label class="field"><span data-i18n="Pages spreadsheet id">Pages spreadsheet id</span><input id="cfg-log-sheet" type="text" dir="ltr" /></label>
+        <label class="field"><span data-i18n="Attendance log gid">Attendance log gid</span><input id="cfg-log-gid" type="text" inputmode="numeric" dir="ltr" /></label>
+        <label class="field"><span data-i18n="Fingerprint sheet gid">Fingerprint sheet gid</span><input id="cfg-print-gid" type="text" inputmode="numeric" dir="ltr" /></label>
         <label class="field"><span>zk4500.exe</span>
           <span class="file-row">
             <input id="cfg-exe" type="text" dir="ltr" />
@@ -144,8 +150,10 @@
           <p class="detail" data-i18n="Fingerprints are not sent to Bouty.">Fingerprints are not sent to Bouty.</p>
           <label class="field"><span data-i18n="Bouty username">Bouty username</span><input id="bouty-user" type="text" autocomplete="username" dir="ltr" /></label>
           <label class="field"><span data-i18n="Bouty password">Bouty password</span><input id="bouty-password" type="password" autocomplete="new-password" dir="ltr" /></label>
-          <label class="field"><span data-i18n="Bouty attendance settings">Bouty attendance settings</span><textarea id="bouty-settings" rows="10" dir="ltr" spellcheck="false"></textarea></label>
-          <p class="detail" data-i18n="Set each date to its existing attendance day ID and map each roster ID to its enrolment ID. Keep earlier dates until their queued scans are sent.">Set each date to its existing attendance day ID and map each roster ID to its enrolment ID. Keep earlier dates until their queued scans are sent.</p>
+          <details><summary data-i18n="Advanced Bouty settings">Advanced Bouty settings</summary>
+            <label class="field"><span data-i18n="Bouty attendance settings">Bouty attendance settings</span><textarea id="bouty-settings" rows="10" dir="ltr" spellcheck="false"></textarea></label>
+            <p class="detail" data-i18n="Set each date to its existing attendance day ID and map each roster ID to its enrolment ID. Keep earlier dates until their queued scans are sent.">Set each date to its existing attendance day ID and map each roster ID to its enrolment ID. Keep earlier dates until their queued scans are sent.</p>
+          </details>
           <p id="bouty-status" role="status"></p>
           <button id="save-bouty" class="primary" type="button" data-i18n="Save Bouty settings">Save Bouty settings</button>
         </div>

@@ -1,6 +1,6 @@
 # Masjid Attendance
 
-Windows attendance app for a mosque roster in Google Sheets. A ZK4500 fingerprint scan identifies a student by their Marif ID and marks today's checkbox with `حاضر`. The app supports Arabic, enrollment, attendance undo, time corrections, and a persistent queue for network outages.
+Windows attendance app for a mosque roster. A ZK4500 fingerprint scan identifies a student by their Marif ID and records attendance on the selected daily sheet or Bouty website. The Pages spreadsheet stores timestamps and fingerprint templates in both modes. The app supports Arabic, enrollment, attendance undo, time corrections, and a persistent queue for network outages.
 
 ## Set up development
 
@@ -32,9 +32,13 @@ The sheet GID is the numeric `gid` in a tab's URL. The spreadsheet ID is the ide
 
 ## Run the installed app
 
-### Bouty attendance
+### Attendance destination
 
-In Settings → Bouty, enter the Bouty username and password and save. They are encrypted for the current Windows account. Configure the JSON with existing attendance-day IDs by date and an explicit mapping from each roster Marif ID to the corresponding Bouty enrolment ID:
+In Settings → General, choose either the daily attendance sheet or the Bouty website. Both choices continue to use the Pages spreadsheet for attendance timestamps and fingerprint templates. In Bouty mode, the daily attendance grid is not read or written; the local fingerprint index supplies the known roster.
+
+In Settings → Bouty, enter the Bouty username and password and save. They are encrypted for the current Windows account. The app looks up the student by name and the exact source ID in their Bouty notes, then finds their active enrolment in the default course and checks that the enrolment is in that day's group. If a student, enrolment or day is missing or ambiguous, the scan stays queued. The roster and the Bouty student notes must contain the same source ID, and an attendance day with group sessions must already exist on the site.
+
+The advanced settings allow explicit IDs when automatic lookup is unavailable:
 
 ```json
 {
@@ -45,7 +49,7 @@ In Settings → Bouty, enter the Bouty username and password and save. They are 
 }
 ```
 
-These numbers are examples, not actual IDs. Create the day and its group sessions on Bouty first, and use the ID in the attendance day URL. Verify enrolment and status IDs for the actual course before mapping. Keep earlier date entries until their queued scans have synced. The app does not create attendance days or groups; adding a group on Bouty can mark all its students present, so review its defaults. A missing mapping, missing day, login failure, or network failure leaves scans in the separate Bouty queue and shows a status message. Removing a student from today's list queues the configured Absent status. Fingerprints are not sent to Bouty. The request includes the scan timestamp as `changed_at`, but Bouty entry-time persistence has not been verified.
+These numbers are examples, not actual IDs. Create the day and its group sessions on Bouty first. Verify enrolment and status IDs before overriding automatic lookup, and keep earlier date entries until their queued scans have synced. The app does not create attendance days or groups; adding a group on Bouty can mark all its students present, so review its defaults. A missing mapping, missing day, login failure, or network failure leaves scans in the separate Bouty queue and shows a status message. Removing a student from today's list queues an Absent status. Fingerprints are not sent to Bouty. The request includes the scan timestamp as `changed_at`, but Bouty entry-time persistence has not been verified.
 
 Open Settings → Service account → Import JSON to import or replace your Google account. Set the roster fields on the General page. Advanced log/fingerprint settings can be supplied in `%APPDATA%\attendance-service\attendance.config.json`. That legacy profile name is retained so upgrades keep existing settings and renderer preferences. The display name remains Masjid Attendance.
 

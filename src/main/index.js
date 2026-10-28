@@ -32,6 +32,7 @@ import {
   clearFingerprints,
   loadIndex,
   mergeStudents,
+  nextGoogleAttendance,
   attendanceListed,
   attendanceLogRow,
   attendanceStamp,
@@ -50,10 +51,12 @@ import {
   queueAbsent,
   queueClock,
   queuePresent,
+  queuedAttendanceStamp,
   stampFromClock,
   withScanTimes,
   parseAttendanceGrid,
   presentToday,
+  presentFromLog,
   studentProfile,
   pendingPath,
   planAttendance,
@@ -143,6 +146,10 @@ async function setupBouty() {
     credentials: boutyCredentials,
     client,
     settings: async () => boutySettings,
+    studentName: async (id) => {
+      const index = await loadIndex(currentConfig?.fingerprintDir || path.join(homedir(), "Masjid", "v1", "fingerprints"));
+      return Object.values(index.students).find((student) => canonicalStudentId(student.studentId) === canonicalStudentId(id))?.studentName || "";
+    },
     onStatus: publishBouty,
   });
   return { file };
@@ -213,10 +220,14 @@ async function refreshServiceAccount(config) {
 
 function publicConfig(config) {
   return {
+    attendanceDestination: config.attendanceDestination,
     serviceAccountJson: config.serviceAccountJson || "",
     serviceAccount,
     spreadsheetId: config.spreadsheetId || "",
     sheetGid: config.sheetGid,
+    logSpreadsheetId: config.logSpreadsheetId || "",
+    logSheetGid: config.logSheetGid,
+    fingerprintSheetGid: config.fingerprintSheetGid,
     zk4500Cli: config.zk4500Cli || "",
     fingerprintDir: config.fingerprintDir,
     scanTimeoutSeconds: config.scanTimeoutSeconds,
@@ -323,6 +334,18 @@ function reportSheet(title, rows) {
 }
 
 async function reloadStudents(config) {
+  if (config.attendanceDestination === "bouty") {
+    const index = await loadIndex(config.fingerprintDir);
+    const students = Object.entries(index.students).sort(([a], [b]) => a.localeCompare(b))
+      .map(([, student], i) => ({ ...student, rowNumber: i + 1 }));
+    cached = Object.fromEntries(students.map((student) => [String(student.rowNumber), student]));
+    attendanceRows = [];
+    if (!config.logSpreadsheetId || config.logSheetGid === null) throw new Error("Configure the Pages attendance log.");
+    const log = await getSheetGrid(client, config.logSpreadsheetId, config.logSheetGid);
+    sheetPeople = presentFromLog(students, log.rows, new Date());
+    publish({ present: shownPresent() });
+    return { merged: index, rows: log.rows, title: log.title };
+  }
   const { title, rows } = await getSheetGrid(client, config.spreadsheetId, config.sheetGid);
   attendanceRows = rows;
   reportSheet(title, rows);
@@ -443,6 +466,7 @@ function queuedFrom(student, extra = {}) {
     studentName: found.studentName || student?.studentName || "",
     rowNumber: Number(found.rowNumber) || Number(student?.rowNumber) || 0,
     at: new Date().toISOString(),
+    exactTime: true,
     time: clockFromStamp(attendanceStamp(new Date())),
     ...extra,
   };
@@ -456,9 +480,10 @@ function publishShown(extra = {}) {
 /** Show the mark now. The sheet write runs after this returns. */
 async function acceptPresent(student) {
   const person = queuedFrom(student);
+  person.destination = currentConfig?.attendanceDestination || "sheet";
   if (!person.studentId) return { op: "missing-id" };
-  if (boutyEnabled && boutySync) {
-    try { await boutySync.enqueue(person.studentId, "present", person.at); void boutySync.sync(); }
+  if (person.destination === "bouty" && boutySync) {
+    try { await boutySync.enqueue(person.studentId, "present", person.at, person.studentName); void boutySync.sync(); }
     catch { publishBouty("Bouty: attendance could not be queued."); }
   }
   if (attendanceListed(shownPresent(), person)) return { op: "update", value: "حاضر" };
@@ -473,11 +498,12 @@ async function acceptPresent(student) {
 async function acceptAbsent(rowNumber, logRow) {
   const person = shownPresent().find((item) => item.rowNumber === Number(rowNumber));
   if (!person) return { ok: false, error: "That student is not on the sheet." };
-  if (boutyEnabled && boutySync) {
-    try { await boutySync.enqueue(person.studentId, "absent"); void boutySync.sync(); }
+  const destination = currentConfig?.attendanceDestination || "sheet";
+  if (destination === "bouty" && boutySync) {
+    try { await boutySync.enqueue(person.studentId, "absent", new Date().toISOString(), person.name || person.studentName); void boutySync.sync(); }
     catch { return { ok: false, error: "Bouty: attendance could not be queued." }; }
   }
-  outbox = queueAbsent(outbox, { ...person, at: new Date().toISOString(), logRow }, activeWrite);
+  outbox = queueAbsent(outbox, { ...person, destination, at: new Date().toISOString(), logRow }, activeWrite);
   forgetScan(person.rowNumber);
   saveOutbox().catch((err) => console.error(err.message));
   publishShown({ detail: `${person.name} removed from today.`, error: "" });
@@ -491,7 +517,7 @@ function acceptClock(rowNumber, logRow, time) {
   const person = shownPresent().find((item) => item.rowNumber === Number(rowNumber));
   if (!person) return { ok: false, error: "That student is not on the sheet." };
   const clock = clockFromStamp(stamp);
-  outbox = queueClock(outbox, { ...person, at: new Date().toISOString(), time: clock, logRow }, activeWrite);
+  outbox = queueClock(outbox, { ...person, destination: currentConfig?.attendanceDestination || "sheet", at: new Date().toISOString(), time: clock, logRow }, activeWrite);
   rememberClock(person.rowNumber, clock);
   saveOutbox().catch((err) => console.error(err.message));
   publishShown({ detail: `Time for ${person.name} set to ${stamp}.`, error: "" });
@@ -520,6 +546,7 @@ async function publishPresent(config) {
     return;
   }
   try {
+    if (config.attendanceDestination === "bouty") { await reloadStudents(config); return; }
     const { rows } = await getSheetGrid(client, config.spreadsheetId, config.sheetGid);
     sheetPeople = await timesFor(config, presentToday(rows, new Date()));
   } catch (err) {
@@ -530,6 +557,8 @@ async function publishPresent(config) {
 
 async function writeQueuedPresent(config, item) {
   const when = new Date(item.at);
+  if (item.destination === "bouty" && (!config.logSpreadsheetId || config.logSheetGid === null)) throw new Error("Configure the Pages attendance log.");
+  if (item.destination === "bouty") item.cell = true;
   if (!item.cell) {
     const [{ title, rows }, layout] = await Promise.all([
       getSheetGrid(client, config.spreadsheetId, config.sheetGid),
@@ -548,7 +577,7 @@ async function writeQueuedPresent(config, item) {
       const log = await getSheetGrid(client, config.logSpreadsheetId, config.logSheetGid);
       const header = log.rows[0] || ["الطالب", "حضور"];
       const values = attendanceLogRow(item.studentId, when, header, item.studentName);
-      const stamp = item.time ? stampFromClock(when, item.time) : "";
+      const stamp = queuedAttendanceStamp(item);
       if (stamp) values[logLayout(header).time] = stamp;
       const hits = logHits(log.rows, item.studentId, when);
       const hit = hits.at(-1);
@@ -566,6 +595,8 @@ async function writeQueuedPresent(config, item) {
 
 async function writeQueuedAbsent(config, item) {
   const when = new Date(item.at);
+  if (item.destination === "bouty" && (!config.logSpreadsheetId || config.logSheetGid === null)) throw new Error("Configure the Pages attendance log.");
+  if (item.destination === "bouty") item.cell = true;
   if (!item.cell) {
     const [{ title, rows }, layout] = await Promise.all([
       getSheetGrid(client, config.spreadsheetId, config.sheetGid),
@@ -625,7 +656,8 @@ async function drainOutbox() {
   if (!outbox.length || !client || sheetDenied || !currentConfig) return;
   const config = currentConfig;
   while (outbox.length && client && !sheetDenied) {
-    const item = outbox[0];
+    const item = nextGoogleAttendance(outbox, config.attendanceDestination);
+    if (!item) { publish({ syncNote: "Daily sheet changes are waiting." }); return; }
     activeWrite = item;
     try {
       const result = await writeQueued(config, item);
@@ -1412,7 +1444,7 @@ async function assignStudent(key) {
       publish({ detail: `${state.detail} The fingerprint sheet was not written.`.trim() });
     });
   }
-  const plan = acceptPresent(draft);
+  const plan = await acceptPresent(draft);
   const note = markDetail(plan);
   if (note) extra = note;
   const who = draft.studentName || draft.studentId;
@@ -1634,12 +1666,22 @@ function registerIpc() {
   ipcMain.handle("saveConfig", async (_event, input) => {
     try {
       const prev = loadConfig(configOptions());
+      const attendanceDestination = input?.attendanceDestination === "bouty" ? "bouty" : "sheet";
       const gidText = String(input?.sheetGid ?? "").trim();
       const sheetGid = gidText ? Number(gidText) : prev.sheetGid;
-      if (!Number.isInteger(sheetGid) || sheetGid < 0) throw new Error("Sheet gid must be a number.");
+      if (attendanceDestination === "sheet" && (!Number.isInteger(sheetGid) || sheetGid < 0)) throw new Error("Sheet gid must be a number.");
+      const parseGid = (value, fallback) => String(value ?? "").trim() ? Number(value) : fallback;
+      const logSheetGid = parseGid(input?.logSheetGid, prev.logSheetGid);
+      const fingerprintSheetGid = parseGid(input?.fingerprintSheetGid, prev.fingerprintSheetGid);
+      const logSpreadsheetId = String(input?.logSpreadsheetId ?? prev.logSpreadsheetId ?? "").trim();
+      if (attendanceDestination === "bouty" && (!logSpreadsheetId || !Number.isInteger(logSheetGid) || logSheetGid < 0 || !Number.isInteger(fingerprintSheetGid) || fingerprintSheetGid < 0)) throw new Error("Configure the Pages attendance and fingerprint sheets.");
       await writeConfigFile(prev, {
+        attendanceDestination,
         spreadsheetId: String(input?.spreadsheetId || "").trim(),
         sheetGid,
+        logSpreadsheetId,
+        logSheetGid,
+        fingerprintSheetGid,
         zk4500Cli: String(input?.zk4500Cli || "").trim() || prev.zk4500Cli,
         scanTimeoutSeconds: prev.scanTimeoutSeconds,
         syncIntervalSeconds: prev.syncIntervalSeconds,

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createBoutyResolver } from "./bouty-resolve.mjs";
 
 // This endpoint is the one used by the site's manual attendance controls.
 const ORIGIN = "https://albouty.saas.hassiba.tech";
@@ -20,6 +21,7 @@ export function createBoutyClient(fetch) {
     return response;
   }
 
+  const resolve = createBoutyResolver({ page, csrf: () => csrf });
   return {
     async login(username, password) {
       csrf = "";
@@ -49,6 +51,10 @@ export function createBoutyClient(fetch) {
       userId = nextUser;
     },
 
+    async resolve(input) {
+      if (!csrf || !userId) throw new Error("Sign in to Bouty first.");
+      return resolve(input);
+    },
     async mark({ dayId, enrollmentId, statusId, changedAt, operationId }) {
       if (!csrf || !userId) throw new Error("Sign in to Bouty first.");
       const day = positiveInteger(dayId, "attendance day");
