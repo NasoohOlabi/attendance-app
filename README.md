@@ -34,9 +34,9 @@ The sheet GID is the numeric `gid` in a tab's URL. The spreadsheet ID is the ide
 
 ### Attendance destination
 
-In Settings → General, choose either the daily attendance sheet or the Bouty website. Both choices continue to use the Pages spreadsheet for attendance timestamps and fingerprint templates. In Bouty mode, the daily attendance grid is not read or written; the local fingerprint index supplies the known roster.
+In Settings → General, choose either the daily attendance sheet or the Bouty website. Both choices continue to use the Pages spreadsheet for attendance timestamps and fingerprint templates. In Bouty mode, the daily attendance grid is not read or written: the fingerprint picker searches Bouty, and a matched student's displayed name and details come from Bouty. The local fingerprint index keeps the ID and a name hint for looking up an existing print. If the site cannot verify the identity, the app shows the ID and an unavailable message instead of old sheet details.
 
-In Settings → Bouty, enter the Bouty username and password and save. They are encrypted for the current Windows account. The app looks up the student by name and the exact source ID in their Bouty notes, then finds their active enrolment in the default course and checks that the enrolment is in that day's group. If a student, enrolment or day is missing or ambiguous, the scan stays queued. The roster and the Bouty student notes must contain the same source ID, and an attendance day with group sessions must already exist on the site.
+In Settings → Bouty, enter the Bouty username and password and save. They are encrypted for the current Windows account. The app looks up the student by a name hint and the source ID in their Bouty notes, treating the roster's zero-padded ID as the corresponding numeric source ID. It then finds their active enrolment in the default course and checks that the enrolment is in that day's group. If a student, enrolment or day is missing or ambiguous, the scan stays queued. The roster and the Bouty student notes must contain the same source ID, and an attendance day with group sessions must already exist on the site. For new fingerprints, search the site's students by name; entries without a unique source ID are not offered for assignment.
 
 The advanced settings allow explicit IDs when automatic lookup is unavailable:
 

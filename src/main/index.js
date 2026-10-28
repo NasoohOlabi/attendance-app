@@ -6,6 +6,7 @@ import { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, safeStorage, 
 import { createBoutyClient } from "../bouty.mjs";
 import { createBoutyCredentials, createBoutyQueue, parseBoutyMapping } from "../bouty-storage.mjs";
 import { createBoutySync } from "../bouty-sync.mjs";
+import { applyBoutyProfile, boutyStudentChoices } from "../bouty-resolve.mjs";
 import { createCredentialStore, credentialFile } from "../credentials.mjs";
 import { legacyUserDataPath, loadConfig, scannerExeInResources } from "../config.mjs";
 import { appLogFile, startAppLog } from "../log.mjs";
@@ -109,6 +110,43 @@ let boutyEnabled = false;
 let boutySettings = { mapping: [], days: {}, presentStatusId: 1, absentStatusId: 2 };
 let boutyMessage = "";
 let boutyContext = null;
+let boutyLookup = null;
+let boutyLookupTail = Promise.resolve();
+let boutyAccountVersion = 0;
+const boutyNames = new Map();
+let boutySearch = { query: "", until: 0, promise: null };
+
+function withBoutyLookup(fn) {
+  const version = boutyAccountVersion;
+  const run = boutyLookupTail.then(async () => {
+    if (version !== boutyAccountVersion) throw new Error("Bouty account changed.");
+    const account = await boutyCredentials?.read();
+    if (!account || !boutyLookup) throw new Error("Bouty: sign in to look up students.");
+    await boutyLookup.session.clearStorageData({ storages: ["cookies"] });
+    await boutyLookup.client.login(account.username, account.password);
+    const result = await fn(boutyLookup.client);
+    if (version !== boutyAccountVersion) throw new Error("Bouty account changed.");
+    return result;
+  });
+  boutyLookupTail = run.catch(() => {});
+  return run;
+}
+
+function loadBoutyProfile(student, at) {
+  const id = canonicalStudentId(student.studentId);
+  if (!id) return;
+  void withBoutyLookup((api) => api.student({ studentId: id, studentName: student.studentName || "" }))
+    .then((profile) => {
+      if (currentConfig?.attendanceDestination !== "bouty") return;
+      boutyNames.set(id, profile.studentName);
+      sheetPeople = sheetPeople.map((person) => canonicalStudentId(person.studentId) === id ? { ...person, name: profile.studentName } : person);
+      const match = applyBoutyProfile(state.lastMatch, at, id, profile, currentConfig?.attendanceDestination);
+      if (match) publish({ lastMatch: match, present: shownPresent() });
+    }).catch(() => {
+      if (currentConfig?.attendanceDestination !== "bouty" || state.lastMatch?.at !== at || canonicalStudentId(state.lastMatch?.studentId) !== id) return;
+      publish({ lastMatch: { ...state.lastMatch, profileStatus: "Bouty student information is unavailable." } });
+    });
+}
 
 function boutyPublic() {
   return { enabled: boutyEnabled, message: boutyMessage, ...boutySettings };
@@ -136,6 +174,8 @@ async function setupBouty() {
     publishBouty("Bouty account could not be opened.");
   }
   const browserSession = session.fromPartition("bouty-attendance");
+  const profileSession = session.fromPartition("bouty-students");
+  boutyLookup = { session: profileSession, client: createBoutyClient((url, options) => profileSession.fetch(url, options)) };
   const api = createBoutyClient((url, options) => browserSession.fetch(url, options));
   const client = { ...api, async login(username, password) {
     await browserSession.clearStorageData({ storages: ["cookies"] });
@@ -302,10 +342,11 @@ function profileFieldsFor(student) {
 
 function lastMatchOf(student, at) {
   return {
-    studentName: student?.studentName || "",
+    studentName: currentConfig?.attendanceDestination === "bouty" ? "" : student?.studentName || "",
     studentId: student?.studentId || "",
     at,
-    fields: profileFieldsFor(student),
+    fields: currentConfig?.attendanceDestination === "bouty" ? [] : profileFieldsFor(student),
+    ...(currentConfig?.attendanceDestination === "bouty" ? { profileStatus: "Loading Bouty student information…" } : {}),
   };
 }
 
@@ -342,7 +383,7 @@ async function reloadStudents(config) {
     attendanceRows = [];
     if (!config.logSpreadsheetId || config.logSheetGid === null) throw new Error("Configure the Pages attendance log.");
     const log = await getSheetGrid(client, config.logSpreadsheetId, config.logSheetGid);
-    sheetPeople = presentFromLog(students, log.rows, new Date());
+    sheetPeople = presentFromLog(students.map((student) => ({ ...student, studentName: boutyNames.get(canonicalStudentId(student.studentId)) || "" })), log.rows, new Date());
     publish({ present: shownPresent() });
     return { merged: index, rows: log.rows, title: log.title };
   }
@@ -445,7 +486,9 @@ function waitingNote() {
 }
 
 function shownPresent() {
-  return overlayPresent(sheetPeople, outbox, todayDay());
+  const people = overlayPresent(sheetPeople, outbox, todayDay());
+  if (currentConfig?.attendanceDestination !== "bouty") return people;
+  return people.map((person) => ({ ...person, name: boutyNames.get(canonicalStudentId(person.studentId)) || person.studentId }));
 }
 
 function rosterStudent(student) {
@@ -500,7 +543,7 @@ async function acceptAbsent(rowNumber, logRow) {
   if (!person) return { ok: false, error: "That student is not on the sheet." };
   const destination = currentConfig?.attendanceDestination || "sheet";
   if (destination === "bouty" && boutySync) {
-    try { await boutySync.enqueue(person.studentId, "absent", new Date().toISOString(), person.name || person.studentName); void boutySync.sync(); }
+    try { await boutySync.enqueue(person.studentId, "absent", new Date().toISOString(), rosterStudent(person).studentName); void boutySync.sync(); }
     catch { return { ok: false, error: "Bouty: attendance could not be queued." }; }
   }
   outbox = queueAbsent(outbox, { ...person, destination, at: new Date().toISOString(), logRow }, activeWrite);
@@ -798,12 +841,14 @@ async function showPending(config, gen, reason = "") {
   try {
     await reloadStudents(config);
   } catch (err) {
-    error = `Can't load students from the sheet: ${err.message}`;
+    error = config.attendanceDestination === "bouty" ? `Can't load the Pages attendance log: ${err.message}` : `Can't load students from the sheet: ${err.message}`;
     detail = error;
     const index = await loadIndex(config.fingerprintDir);
     cacheStudents(index.students);
   }
-  if (!error && Object.keys(cached).length === 0) {
+  if (!error && config.attendanceDestination === "bouty") {
+    detail = "Search Bouty for the student.";
+  } else if (!error && Object.keys(cached).length === 0) {
     detail = "No students on the sheet yet. Add them in Google Sheets. This print is kept.";
   }
   publish({ phase: "pending", headline: "New fingerprint", detail, error, canCloseSettings: true, enroll: null }, gen);
@@ -953,7 +998,9 @@ async function handleCapture(config, result, body, gen, scanImage) {
   }
   const index = await loadIndex(config.fingerprintDir);
   const decision = captureScreen(index.students, result);
-  const who = decision.student?.studentName || decision.student?.studentId || "";
+  const who = currentConfig?.attendanceDestination === "bouty"
+    ? decision.student?.studentId || ""
+    : decision.student?.studentName || decision.student?.studentId || "";
   pushTrace(
     {
       type: "result",
@@ -969,17 +1016,18 @@ async function handleCapture(config, result, body, gen, scanImage) {
   );
   if (decision.attendance) {
     const student = decision.student;
-    const who = student.studentName || student.studentId;
+    const who = currentConfig?.attendanceDestination === "bouty" ? student.studentId : student.studentName || student.studentId;
     console.log(`matched ${who || student.templateFile}`);
     const plan = await acceptPresent(student);
     const extra = markDetail(plan);
     const detail = [`Matched ${who}`, extra].filter(Boolean).join(" ");
+    const matchedAt = new Date().toISOString();
     publish(
       {
         phase: pause ? state.phase : "ready",
         headline: pause ? state.headline : "Place a finger",
         detail: pause ? state.detail : detail,
-        lastMatch: lastMatchOf(student, new Date().toISOString()),
+        lastMatch: lastMatchOf(student, matchedAt),
         scanImage,
         scanImages: [],
         error: extra.startsWith("Marked") ? "" : extra,
@@ -988,6 +1036,7 @@ async function handleCapture(config, result, body, gen, scanImage) {
       },
       gen,
     );
+    if (config.attendanceDestination === "bouty") loadBoutyProfile(student, matchedAt);
     return;
   }
   if (!decision.picker) {
@@ -1431,6 +1480,7 @@ async function assignStudent(key) {
   pending = null;
   const cacheKey = student.rowNumber ? String(student.rowNumber) : studentKey(draft);
   cached[cacheKey] = { ...cached[cacheKey], ...draft };
+  if (config.attendanceDestination === "bouty") boutySearch = { query: "", until: 0, promise: null };
 
   const linked = {
     phase: "ready",
@@ -1447,7 +1497,7 @@ async function assignStudent(key) {
   const plan = await acceptPresent(draft);
   const note = markDetail(plan);
   if (note) extra = note;
-  const who = draft.studentName || draft.studentId;
+  const who = config.attendanceDestination === "bouty" ? draft.studentId : draft.studentName || draft.studentId;
   const detail = batchSave
     ? `Saved ${savedCount} scan${savedCount === 1 ? "" : "s"}. ${extra}`
     : `Linked ${who}. ${extra}`;
@@ -1463,6 +1513,7 @@ async function assignStudent(key) {
     syncNote: waitingNote() || state.syncNote,
     ...(hadGallery ? { scanImage: scanImageUrl() } : {}),
   });
+  if (config.attendanceDestination === "bouty") loadBoutyProfile(draft, draft.capturedAt);
   console.log(`linked ${who} file=${templateFile} scans=${savedCount}`);
 }
 
@@ -1547,6 +1598,10 @@ function registerIpc() {
         const checkClient = createBoutyClient((url, options) => checkSession.fetch(url, options));
         await checkClient.login(input.username, input.password);
         await boutyCredentials.save({ username: input.username, password: input.password });
+        boutyAccountVersion += 1;
+        boutyNames.clear();
+        boutySearch = { query: "", until: 0, promise: null };
+        if (currentConfig?.attendanceDestination === "bouty") publish({ lastMatch: null, present: shownPresent() });
         boutyEnabled = true;
       } else if (!boutyEnabled) throw new Error("Enter the Bouty username and password.");
       const temporary = `${boutyContext.file}.tmp`;
@@ -1560,7 +1615,30 @@ function registerIpc() {
     } catch (error) { return { ok: false, error: error.message }; }
   });
   ipcMain.handle("getState", () => state);
-  ipcMain.handle("filter", (_event, query) => {
+  ipcMain.handle("filter", async (_event, query) => {
+    if (currentConfig?.attendanceDestination === "bouty") {
+      const text = String(query || "").trim().slice(0, 120);
+      if (text.length < 2) return { students: [], error: "Type at least two characters to search Bouty." };
+      if (boutySearch.query !== text || boutySearch.until <= Date.now()) {
+        const config = currentConfig;
+        const promise = withBoutyLookup((api) => api.studentsFor(text)).then(async (profiles) => {
+          const index = await loadIndex(config.fingerprintDir);
+          if (currentConfig?.attendanceDestination !== "bouty") return [];
+          const choices = boutyStudentChoices(profiles, index.students);
+          if (profiles.length && !choices.length) throw new Error("Bouty students need an unambiguous source ID.");
+          return choices.map((student) => {
+            const key = `bouty:${student.siteId}`;
+            cached[key] = student;
+            boutyNames.set(student.studentId, student.studentName);
+            return { key, studentId: student.studentId, studentName: student.studentName, hasPrint: Boolean(student.templateFile) };
+          });
+        });
+        boutySearch = { query: text, until: Date.now() + 30000, promise };
+        promise.catch(() => { if (boutySearch.promise === promise) boutySearch.until = 0; });
+      }
+      try { return { students: await boutySearch.promise, error: "" }; }
+      catch (error) { return { students: [], error: error?.message?.startsWith("Bouty") ? error.message : "Bouty student information is unavailable." }; }
+    }
     return fuzzyStudents(Object.values(cached), query).map(viewStudent);
   });
   ipcMain.handle("assign", async (_event, key) => {
@@ -1686,6 +1764,13 @@ function registerIpc() {
         scanTimeoutSeconds: prev.scanTimeoutSeconds,
         syncIntervalSeconds: prev.syncIntervalSeconds,
       });
+      if (attendanceDestination !== prev.attendanceDestination) {
+        boutyAccountVersion += 1;
+        boutyNames.clear();
+        boutySearch = { query: "", until: 0, promise: null };
+        sheetPeople = [];
+        publish({ lastMatch: null, present: [] });
+      }
       pause = false;
       await startLoop();
       return { ok: true };

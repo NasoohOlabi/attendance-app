@@ -3,7 +3,7 @@ import test from "node:test";
 import { createBoutyClient } from "../../src/bouty.mjs";
 import { createBoutyCredentials, createBoutyQueue, parseBoutyMapping } from "../../src/bouty-storage.mjs";
 import { createBoutySync } from "../../src/bouty-sync.mjs";
-import { createBoutyResolver } from "../../src/bouty-resolve.mjs";
+import { createBoutyResolver, boutyStudentChoices, applyBoutyProfile, normalizeBoutySourceId } from "../../src/bouty-resolve.mjs";
 import { mkdtemp, readFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
@@ -46,6 +46,21 @@ test("manual attendance sends only the enrolment operation and requires confirma
   await assert.rejects(failing.mark({ dayId: 4, enrollmentId: 8, statusId: 1, changedAt: new Date() }), /did not confirm/);
 });
 
+test("Electron's cancelled login redirect requires a successful authenticated attendance page", async () => {
+  let signedIn = true;
+  const fetch = async (url, options) => {
+    if (url.endsWith("/login") && options.method === "POST") throw new Error("Redirect was cancelled");
+    if (url.endsWith("/attendance") && !signedIn) throw new Error("Redirect was cancelled");
+    const text = url.endsWith("/login") ? '<input name="_token" value="token">' : '<meta name="csrf-token" content="token"><body data-current-user-id="1">';
+    return { ok: true, url: "", text: async () => text };
+  };
+  const client = createBoutyClient(fetch);
+  await client.login("user", "password");
+  signedIn = false;
+  await assert.rejects(client.login("user", "password"));
+  await assert.rejects(client.mark({}), /Sign in/);
+});
+
 test("Bouty credentials are encrypted and the independent queue survives concurrent changes", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "bouty-"));
   const key = randomBytes(32);
@@ -78,6 +93,38 @@ test("student mapping refuses duplicate students and enrolments", () => {
   assert.equal(parseBoutyMapping([{ studentId: "00 00 000 001", enrollmentId: 7 }]).size, 1);
   assert.throws(() => parseBoutyMapping([{ studentId: "00 00 000 001", enrollmentId: 7 }, { studentId: "00 00 000 001", enrollmentId: 8 }]), /Duplicate/);
   assert.throws(() => parseBoutyMapping([{ studentId: "00 00 000 001", enrollmentId: 7 }, { studentId: "00 00 000 002", enrollmentId: 7 }]), /Duplicate/);
+});
+
+test("Bouty picker uses site names and refuses ambiguous source or local fingerprint IDs", () => {
+  const profiles = [
+    { id: 1, studentName: "Current site name", sourceIds: ["001"] },
+    { id: 2, studentName: "Duplicate A", sourceIds: ["00 02"] },
+    { id: 3, studentName: "Duplicate B", sourceIds: ["0002"] },
+    { id: 4, studentName: "Missing ID", sourceIds: [] },
+  ];
+  assert.deepEqual(boutyStudentChoices(profiles, { old: { studentId: "00 1", studentName: "Old sheet name", templateFile: "print.txt" } }), [
+    { siteId: 1, studentId: "00 1", studentName: "Current site name", templateFile: "print.txt", capturedAt: "" },
+  ]);
+  assert.deepEqual(boutyStudentChoices([profiles[0]], { a: { studentId: "001" }, b: { studentId: "00 1" } }), []);
+});
+
+test("padded roster IDs match numeric site IDs without accepting nonnumeric values", () => {
+  assert.equal(normalizeBoutySourceId("00 00 000 005"), "5");
+  assert.equal(normalizeBoutySourceId("5"), "5");
+  assert.equal(normalizeBoutySourceId("not an ID"), "");
+  assert.deepEqual(boutyStudentChoices([{ id: 9, studentName: "Site", sourceIds: ["5"] }],
+    { x: { studentId: "00 00 000 005", templateFile: "print.txt" } }).map((p) => p.studentId), ["00 00 000 005"]);
+  assert.deepEqual(boutyStudentChoices([{ id: 9, studentName: "Site", sourceIds: ["5"] }], {}).map((p) => p.studentId), ["00 00 000 005"]);
+  assert.deepEqual(boutyStudentChoices([{ id: 9, studentName: "Site", sourceIds: ["12345678901"] }], {}), []);
+  assert.deepEqual(boutyStudentChoices([{ id: 9, studentName: "One", sourceIds: ["5"] }, { id: 10, studentName: "Two", sourceIds: ["0005"] }], {}), []);
+});
+
+test("a delayed Bouty profile cannot replace a newer scan", () => {
+  const match = { at: "later", studentId: "002", studentName: "", fields: [] };
+  const oldProfile = { studentName: "Previous student", fields: [{ label: "المدرسة", value: "Old", kind: "line" }] };
+  assert.equal(applyBoutyProfile(match, "earlier", "001", oldProfile, "bouty"), null);
+  assert.equal(applyBoutyProfile(match, "later", "002", oldProfile, "sheet"), null);
+  assert.equal(applyBoutyProfile(match, "later", "002", oldProfile, "bouty").studentName, "Previous student");
 });
 
 test("Bouty scans remain queued until their day and enrolment are mapped", async () => {
@@ -162,9 +209,9 @@ test("Bouty resolves the exact source ID, active enrolment, day and group withou
   const snapshot = (name, data) => JSON.stringify({ memo: { name }, data });
   const escaped = (text) => text.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
   const pageHtml = (name, data, inner = "") => `<script data-update-uri="https://albouty.saas.hassiba.tech/livewire/update"></script><div wire:snapshot="${escaped(snapshot(name, data))}">${inner}</div>`;
-  const rows = '<button wire:click="edit(11)"></button><button wire:click="edit(12)"></button>';
+  const rows = '<table><tr><td>Other</td><td>7001</td><td><button wire:click="edit(11)"></button></td></tr><tr><td>Site Name</td><td>7002</td><td><button wire:click="edit(12)"></button></td></tr></table>';
   const student = pageHtml("students.index", {}, rows);
-  const enrollments = pageHtml("enrollments.index", { courseFilter: "1" }, '<button wire:click="edit(31)"></button>');
+  const enrollments = pageHtml("enrollments.index", { courseFilter: "1" }, '<table><tr><td>1</td><td>Site Name</td><td>Website Group</td><td><button wire:click="edit(31)"></button></td></tr></table>');
   const attendance = pageHtml("attendance.index", { course_id: "1" });
   const dayRows = '<select id="attendance-day-course"><option value="1">Winter</option></select><table><tr><td>31-10-2026</td><td>Winter</td><td><a href="https://albouty.saas.hassiba.tech/attendance/days/students/22">open</a></td></tr></table>';
   const calls = [];
@@ -177,12 +224,15 @@ test("Bouty resolves the exact source ID, active enrolment, day and group withou
     if (url === "/student-attendance/groups/8") return { text: async () => '<table><tr data-attendance-type="student" data-attendance-entity-id="31"><td><select><option value="1">Present</option><option value="2">Absent</option></select></td></tr></table>' };
     const body = JSON.parse(opts.body), request = body.components[0], state = JSON.parse(request.snapshot);
     const method = request.calls[0]?.method, id = request.calls[0]?.params[0];
-    if (state.memo.name === "students.index" && method === "edit") state.data.notes = `معرف المصدر: ${id === 11 ? "002" : "001"}`;
+    if (state.memo.name === "students.index" && method === "edit") Object.assign(state.data, { notes: `معرف المصدر: ${id === 11 ? "002" : "001"}`, first_name: "Same", last_name: "Name", school_name: "From Bouty" });
     if (state.memo.name === "enrollments.index" && method === "edit") Object.assign(state.data, { student_id: 12, status: "active" });
     const html = state.memo.name === "students.index" ? student : state.memo.name === "enrollments.index" ? enrollments : pageHtml("attendance.index", state.data, dayRows);
     return { json: async () => ({ components: [{ snapshot: JSON.stringify(state), effects: { html } }] }) };
   };
   const resolve = createBoutyResolver({ page, csrf: () => "token" });
+  assert.deepEqual(await resolve.student({ studentId: "001", studentName: "Old Name" }), {
+    id: 12, sourceIds: ["001"], studentName: "Same Name", fields: [{ label: "رقم الطالب", value: "7002", kind: "chip" }, { label: "المدرسة", value: "From Bouty", kind: "line" }, { label: "المجموعة", value: "Website Group", kind: "chip" }],
+  });
   assert.deepEqual(await resolve({ studentId: "001", studentName: "Same Name", date: "2026-10-31", kind: "present" }), { dayId: 22, enrollmentId: 31, statusId: 1 });
   assert.deepEqual(await resolve({ studentId: "001", studentName: "Same Name", date: "2026-10-31", kind: "absent" }), { dayId: 22, enrollmentId: 31, statusId: 2 });
   await assert.rejects(resolve({ studentId: "003", studentName: "Same Name", date: "2026-10-31", kind: "present" }), /identity is missing/);

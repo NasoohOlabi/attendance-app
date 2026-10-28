@@ -183,8 +183,10 @@ function renderList(students) {
 
 async function refreshList() {
   const gen = ++filterGen;
-  const students = await window.attendance.filter(search.value);
+  const result = await window.attendance.filter(search.value);
   if (gen !== filterGen) return;
+  const students = Array.isArray(result) ? result : result?.students || [];
+  empty.textContent = translate(Array.isArray(result) ? "No matching students" : result?.error || "No matching students");
   renderList(students);
 }
 
@@ -505,6 +507,10 @@ function render(state) {
         time.textContent = when;
         lastMeta.append(time);
       }
+      if (state.lastMatch.profileStatus) {
+        if (lastMeta.childNodes.length) lastMeta.append(document.createTextNode("  ·  "));
+        lastMeta.append(document.createTextNode(translate(state.lastMatch.profileStatus)));
+      }
       renderProfile(state.lastMatch.fields);
     } else {
       last.hidden = true;
@@ -536,7 +542,18 @@ function render(state) {
   sync.textContent = [state.syncNote, state.bouty?.message].filter(Boolean).map(translate).join(" · ");
 }
 
-search.addEventListener("input", () => refreshList());
+let searchTimer;
+search.addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  filterGen += 1;
+  if (lastState?.config?.attendanceDestination === "bouty") {
+    list.replaceChildren();
+    empty.hidden = false;
+    empty.textContent = translate("Searching Bouty…");
+    searchTimer = setTimeout(() => refreshList(), 350);
+  }
+  else void refreshList();
+});
 search.addEventListener("keydown", (event) => {
   if (event.key !== "Enter") return;
   const first = list.querySelector("button");
