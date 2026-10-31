@@ -7,6 +7,7 @@ import electronUpdater from "electron-updater";
 import { createCredentialStore, credentialFile } from "../credentials.mjs";
 import { legacyUserDataPath, loadConfig, scannerExeInResources } from "../config.mjs";
 import { appLogFile, startAppLog } from "../log.mjs";
+import { updaterChannel, updaterErrorDetails, updaterInfoDetails } from "../update.mjs";
 import {
   createGoogle,
   explainApiFailure,
@@ -102,6 +103,7 @@ let sheetReported = false;
 let attendanceRows = [];
 let scannerReady = true;
 let scanFailStreak = 0;
+let updateProgressLog = -1;
 
 const updateState = {
   enabled: app.isPackaged,
@@ -136,12 +138,15 @@ function publishUpdate(patch) {
 }
 
 function configureAutoUpdater() {
-  const configuredChannel = currentConfig?.updateChannel === "nightly" ? "nightly" : "stable";
-  const versionChannel = /-nightly(?:\.|$)/i.test(app.getVersion()) ? "nightly" : "stable";
-  autoUpdater.channel = configuredChannel === "nightly" || versionChannel === "nightly"
-    ? "nightly"
-    : "stable";
+  const configuredChannel = currentConfig?.updateChannel;
+  autoUpdater.channel = updaterChannel({ configuredChannel, currentVersion: app.getVersion() });
   autoUpdater.allowPrerelease = autoUpdater.channel === "nightly";
+  console.info("updater configured", {
+    currentVersion: app.getVersion(),
+    configuredChannel,
+    channel: autoUpdater.channel,
+    allowPrerelease: autoUpdater.allowPrerelease,
+  });
 }
 
 function setupAutoUpdater() {
@@ -149,15 +154,33 @@ function setupAutoUpdater() {
   configureAutoUpdater();
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
-  autoUpdater.on("checking-for-update", () => publishUpdate({ status: "checking", error: "" }));
+  autoUpdater.on("checking-for-update", () => {
+    console.info("updater checking", { channel: autoUpdater.channel });
+    publishUpdate({ status: "checking", error: "" });
+  });
   autoUpdater.on("update-available", (info) => {
+    updateProgressLog = -1;
+    console.info("updater update available", updaterInfoDetails(info));
     publishUpdate({ status: "available", version: info.version, progress: 0, error: "" });
   });
-  autoUpdater.on("update-not-available", () => publishUpdate({ status: "up-to-date", progress: 0, error: "" }));
-  autoUpdater.on("download-progress", (progress) => publishUpdate({ status: "downloading", progress: Math.round(progress.percent || 0), error: "" }));
-  autoUpdater.on("update-downloaded", (info) => publishUpdate({ status: "downloaded", version: info.version, progress: 100, error: "" }));
+  autoUpdater.on("update-not-available", (info) => {
+    console.info("updater up to date", updaterInfoDetails(info));
+    publishUpdate({ status: "up-to-date", progress: 0, error: "" });
+  });
+  autoUpdater.on("download-progress", (progress) => {
+    const percent = Math.round(progress.percent || 0);
+    if (percent === 0 || percent >= 100 || percent >= updateProgressLog + 25) {
+      updateProgressLog = percent;
+      console.info("updater download progress", { percent });
+    }
+    publishUpdate({ status: "downloading", progress: percent, error: "" });
+  });
+  autoUpdater.on("update-downloaded", (info) => {
+    console.info("updater update downloaded", updaterInfoDetails(info));
+    publishUpdate({ status: "downloaded", version: info.version, progress: 100, error: "" });
+  });
   autoUpdater.on("error", (error) => {
-    console.error("update failed", error);
+    console.error("updater event failed", updaterErrorDetails(error));
     publishUpdate({ status: "error", error: UPDATE_CHECK_ERROR });
   });
 }
@@ -165,11 +188,13 @@ function setupAutoUpdater() {
 async function checkForUpdates() {
   if (!app.isPackaged) return { ok: false, error: "Updates are available in installed builds." };
   try {
+    console.info("updater check requested", { currentVersion: app.getVersion(), channel: autoUpdater.channel });
     publishUpdate({ status: "checking", error: "" });
     await autoUpdater.checkForUpdates();
+    console.info("updater check completed", { status: updateState.status, version: updateState.version || "" });
     return { ok: true };
   } catch (error) {
-    console.error("update check failed", error);
+    console.error("updater check failed", updaterErrorDetails(error));
     publishUpdate({ status: "error", error: UPDATE_CHECK_ERROR });
     return { ok: false, error: UPDATE_CHECK_ERROR };
   }
@@ -184,11 +209,14 @@ async function updateAction() {
   }
   if (updateState.status === "available") {
     try {
+      updateProgressLog = -1;
       publishUpdate({ status: "downloading", progress: 0, error: "" });
+      console.info("updater download requested", { version: updateState.version || "", channel: autoUpdater.channel });
       await autoUpdater.downloadUpdate();
+      console.info("updater download completed", { status: updateState.status, version: updateState.version || "" });
       return { ok: true };
     } catch (error) {
-      console.error("update download failed", error);
+      console.error("updater download failed", updaterErrorDetails(error));
       publishUpdate({ status: "error", error: UPDATE_DOWNLOAD_ERROR });
       return { ok: false, error: UPDATE_DOWNLOAD_ERROR };
     }

@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { legacyUserDataPath, LEGACY_USER_DATA_DIR, loadConfig, requireGoogleConfig } from "../src/config.mjs";
 import { appendAppLog, appLogFile, appLogLine } from "../src/log.mjs";
+import { updaterChannel, updaterErrorDetails, updaterInfoDetails } from "../src/update.mjs";
 import { attendanceCellUpdate, createGoogle, explainApiFailure, isOfflineError } from "../src/google.mjs";
 import { translate } from "../src/renderer/i18n.js";
 import { fingerCue, presentTrace, screenForPhase } from "../src/renderer/view.js";
@@ -55,6 +56,33 @@ import {
   templateFileForStudent,
   templatePath,
 } from "../src/store.mjs";
+
+test("updater channel follows nightly config or version", () => {
+  assert.equal(updaterChannel({ configuredChannel: "nightly", currentVersion: "0.1.13" }), "nightly");
+  assert.equal(updaterChannel({ configuredChannel: "stable", currentVersion: "0.1.13-nightly.7" }), "nightly");
+  assert.equal(updaterChannel({ configuredChannel: "stable", currentVersion: "0.1.13" }), "stable");
+});
+
+test("updater diagnostics redact error details to safe bounded fields", () => {
+  const error = new Error("first line\nAuthorization: Bearer secret");
+  error.code = "ERR_UPDATER_TEST";
+  error.statusCode = 503;
+  assert.deepEqual(updaterErrorDetails(error), {
+    message: "first line",
+    code: "ERR_UPDATER_TEST",
+    statusCode: 503,
+  });
+  assert.equal(updaterErrorDetails({}).message, "Unknown updater error");
+  assert.equal(updaterErrorDetails(new Error("x".repeat(1000))).message.length, 600);
+});
+
+test("updater info diagnostics keep only summary fields", () => {
+  assert.deepEqual(updaterInfoDetails({ version: "1.2.3", releaseName: "A".repeat(500), files: [{}, {}], token: "secret" }), {
+    version: "1.2.3",
+    releaseName: "A".repeat(200),
+    files: 2,
+  });
+});
 
 test("a capture cycle records started, exited, and the next capture", () => {
   let lines = [];
