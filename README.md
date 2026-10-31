@@ -54,6 +54,14 @@ bun audit
 
 For a distributable version, first commit the code, then run `bun run release`. This bumps the app version, commits it, and builds from that commit. Keep installer artifacts private until you have verified redistribution rights for every supplied SDK/interop component. Update the scanner to a supported framework before its current runtime reaches end of support.
 
+## Publish releases and update the installed app
+
+`bun run release` creates the version commit and an annotated `v<version>` tag. Push that explicit tag from the filtered public clone to start `.github/workflows/release.yml`. The workflow builds the Windows installer and publishes the installer, `latest.yml`, and blockmap to the GitHub Release. GitHub Actions uses the repository URL from its checkout, so the package does not contain a guessed owner name.
+
+The release workflow needs a `ZK4500_INTEROP_BUNDLE_B64` repository secret containing a base64 ZIP with the two licensed scanner wrappers (`AxInterop.ZKFPEngXControl.dll` and `Interop.ZKFPEngXControl.dll`). Keep those vendor files out of Git and do not publish them separately. The workflow also uses the built-in `GITHUB_TOKEN` to publish the release.
+
+Installed builds show **Check for updates** in the window header. A click checks GitHub, downloads a newer release automatically, and changes the button to **Restart to update** when it is ready. Restarting installs the update and keeps the existing app identity, `%APPDATA%\attendance-service` profile, and fingerprint folder. Development builds hide the control.
+
 Only one app and one scanner process may own the device. Close capture normally before scanner diagnostics or prerequisite changes. Force-killing `zk4500.exe` can lock the USB driver. See [AGENTS.md](AGENTS.md) and [scanner/AGENTS.md](scanner/AGENTS.md) for the capture contract.
 
 ## Prepare a public source copy

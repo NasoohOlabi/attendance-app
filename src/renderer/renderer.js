@@ -29,6 +29,7 @@ const empty = document.querySelector("#empty");
 const error = document.querySelector("#error");
 const sync = document.querySelector("#sync");
 const settings = document.querySelector("#settings");
+const update = document.querySelector("#update");
 const cancel = document.querySelector("#cancel");
 const confirm = document.querySelector("#confirm");
 const confirmTitle = document.querySelector("#confirm-title");
@@ -53,6 +54,24 @@ let listLoading = false;
 let lastState = null;
 let confirmRequest = null;
 let dashboardOpen = false;
+
+function renderUpdate(updateState) {
+  const info = updateState || {};
+  update.hidden = !info.enabled;
+  if (!info.enabled) return;
+  const labels = {
+    idle: "Check for updates",
+    checking: "Checking for updates…",
+    "up-to-date": "Up to date",
+    downloaded: "Restart to update",
+    error: "Retry update",
+  };
+  update.textContent = info.status === "downloading"
+    ? `${translate("Downloading update…")} ${Math.max(0, Number(info.progress) || 0)}%`
+    : translate(labels[info.status] || labels.idle);
+  update.disabled = info.status === "checking" || info.status === "downloading";
+  update.title = info.error || "";
+}
 
 function renderDashboard(days) {
   trend.replaceChildren();
@@ -482,6 +501,7 @@ function renderProfile(fields) {
 
 function render(state) {
   lastState = state;
+  renderUpdate(state.update);
   renderServiceAccount(state);
   const mode = screenForPhase(state.phase);
   const enteredPicker = mode === "pending" && !picker;
@@ -613,6 +633,14 @@ document.querySelector("#more-scans").addEventListener("click", async () => {
 });
 document.querySelector("#enroll-done").addEventListener("click", () => window.attendance.finishEnroll());
 settings.addEventListener("click", () => window.attendance.openSettings());
+update.addEventListener("click", async () => {
+  update.disabled = true;
+  const result = await window.attendance.updateAction();
+  if (!result?.ok && result?.error) {
+    error.hidden = false;
+    error.textContent = translate(result.error);
+  }
+});
 cancel.addEventListener("click", () => window.attendance.closeSettings());
 document.querySelector("#clear-prints").addEventListener("click", async () => {
   const button = document.querySelector("#clear-prints");

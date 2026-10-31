@@ -3,6 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, safeStorage } from "electron";
+import electronUpdater from "electron-updater";
 import { createCredentialStore, credentialFile } from "../credentials.mjs";
 import { legacyUserDataPath, loadConfig, scannerExeInResources } from "../config.mjs";
 import { appLogFile, startAppLog } from "../log.mjs";
@@ -66,6 +67,7 @@ import {
 } from "../store.mjs";
 
 const mainDir = path.dirname(fileURLToPath(import.meta.url));
+const { autoUpdater } = electronUpdater;
 startAppLog();
 
 protocol.registerSchemesAsPrivileged([
@@ -98,6 +100,14 @@ let attendanceRows = [];
 let scannerReady = true;
 let scanFailStreak = 0;
 
+const updateState = {
+  enabled: app.isPackaged,
+  status: app.isPackaged ? "idle" : "unavailable",
+  version: "",
+  progress: 0,
+  error: "",
+};
+
 let state = {
   phase: "ready",
   headline: "Place a finger",
@@ -114,7 +124,50 @@ let state = {
   enroll: null,
   present: null,
   dashboard: [],
+  update: updateState,
 };
+
+function publishUpdate(patch) {
+  Object.assign(updateState, patch);
+  publish({ update: { ...updateState } });
+}
+
+function setupAutoUpdater() {
+  if (!app.isPackaged) return;
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on("checking-for-update", () => publishUpdate({ status: "checking", error: "" }));
+  autoUpdater.on("update-available", (info) => {
+    publishUpdate({ status: "downloading", version: info.version, progress: 0, error: "" });
+    autoUpdater.downloadUpdate().catch((error) => publishUpdate({ status: "error", error: error.message || "Update download failed." }));
+  });
+  autoUpdater.on("update-not-available", () => publishUpdate({ status: "up-to-date", progress: 0, error: "" }));
+  autoUpdater.on("download-progress", (progress) => publishUpdate({ status: "downloading", progress: Math.round(progress.percent || 0), error: "" }));
+  autoUpdater.on("update-downloaded", (info) => publishUpdate({ status: "downloaded", version: info.version, progress: 100, error: "" }));
+  autoUpdater.on("error", (error) => publishUpdate({ status: "error", error: error.message || "Update check failed." }));
+}
+
+async function checkForUpdates() {
+  if (!app.isPackaged) return { ok: false, error: "Updates are available in installed builds." };
+  try {
+    publishUpdate({ status: "checking", error: "" });
+    await autoUpdater.checkForUpdates();
+    return { ok: true };
+  } catch (error) {
+    publishUpdate({ status: "error", error: error.message || "Update check failed." });
+    return { ok: false, error: error.message || "Update check failed." };
+  }
+}
+
+async function updateAction() {
+  if (!app.isPackaged) return { ok: false, error: "Updates are available in installed builds." };
+  if (updateState.status === "downloaded") {
+    quitRequested = true;
+    autoUpdater.quitAndInstall();
+    return { ok: true };
+  }
+  return checkForUpdates();
+}
 
 function attendanceTrend(rows) {
   const grid = parseAttendanceGrid(rows);
@@ -1457,6 +1510,7 @@ async function createWindow() {
 
 function registerIpc() {
   ipcMain.handle("getState", () => state);
+  ipcMain.handle("updateAction", () => updateAction());
   ipcMain.handle("filter", (_event, query) => {
     return fuzzyStudents(Object.values(cached), query).map(viewStudent);
   });
@@ -1674,9 +1728,12 @@ if (!app.requestSingleInstanceLock()) {
       app.setAppUserModelId("com.masjid.attendance");
       Menu.setApplicationMenu(null);
       registerIpc();
+      updateState.version = app.getVersion();
+      setupAutoUpdater();
       await loadScanTimes();
       await createWindow();
       await startLoop();
+      if (app.isPackaged) setTimeout(() => checkForUpdates(), 5000);
     } catch (err) {
       console.error(err);
       publish({

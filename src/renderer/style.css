@@ -142,6 +142,8 @@ header {
   direction: ltr;
 }
 header button { -webkit-app-region: no-drag; }
+.header-actions { display: flex; align-items: center; gap: 18px; }
+.update-button { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .top-left { position: absolute; left: max(40px, env(titlebar-area-x, 0px)); }
 header .top-left + .kicker { margin: 0 auto; }
 .kicker {

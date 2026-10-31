@@ -17,5 +17,6 @@ run("bun", ["pm", "version", "patch", "--no-git-tag-version"]);
 const version = JSON.parse(readFileSync("package.json", "utf8")).version;
 run("git", ["add", "package.json", "bun.lock"]);
 run("git", ["commit", "-m", `Release ${version}.\n\nThe installer for this commit is Masjid Attendance ${version}.`]);
+run("git", ["tag", "-a", `v${version}`, "-m", `Masjid Attendance ${version}`]);
 run("bun", ["run", "dist"]);
-console.log(`Released ${version}`);
+console.log(`Released ${version} (tagged v${version})`);

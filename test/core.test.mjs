@@ -1083,6 +1083,8 @@ test("the installed profile stays in the captured directory", () => {
   assert.equal(pkg.build.nsis.shortcutName, "Masjid Attendance");
   assert.equal(pkg.build.nsis.uninstallDisplayName, "Masjid Attendance");
   assert.equal(pkg.build.nsis.guid, "2febcda6-3658-5c7c-9dfa-528fe71d9a9a");
+  assert.deepEqual(pkg.build.publish, { provider: "github", releaseType: "release" });
+  assert.match(pkg.scripts["dist:publish"], /--publish always/);
   assert.equal(pkg.build.extraResources[0].from, "staging/scanner");
   assert.equal(JSON.stringify(pkg).includes("D:/workspaces"), false);
   assert.equal(JSON.stringify(pkg).includes("D:\\\\workspaces"), false);

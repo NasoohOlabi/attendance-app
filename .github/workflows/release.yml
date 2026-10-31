@@ -1,0 +1,54 @@
+name: Release Windows installer
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - name: Restore licensed scanner interop wrappers
+        shell: pwsh
+        env:
+          ZK4500_INTEROP_BUNDLE_B64: ${{ secrets.ZK4500_INTEROP_BUNDLE_B64 }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:ZK4500_INTEROP_BUNDLE_B64)) {
+            throw "The ZK4500_INTEROP_BUNDLE_B64 secret is required to build the scanner."
+          }
+          $zip = Join-Path $env:RUNNER_TEMP "zk4500-interop.zip"
+          [IO.File]::WriteAllBytes($zip, [Convert]::FromBase64String($env:ZK4500_INTEROP_BUNDLE_B64))
+          Expand-Archive -LiteralPath $zip -DestinationPath $env:RUNNER_TEMP\zk4500-interop -Force
+          Copy-Item (Join-Path $env:RUNNER_TEMP "zk4500-interop\AxInterop.ZKFPEngXControl.dll") scanner\AxInterop.ZKFPEngXControl.dll
+          Copy-Item (Join-Path $env:RUNNER_TEMP "zk4500-interop\Interop.ZKFPEngXControl.dll") scanner\Interop.ZKFPEngXControl.dll
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run lint:history
+      - run: node node_modules/electron/install.js
+      - name: Build and publish installer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bun run dist:publish
+      - name: Verify release artifacts
+        shell: pwsh
+        run: |
+          if (!(Test-Path "release\Masjid-Attendance-Setup.exe")) { throw "Installer was not produced." }
+          if (!(Test-Path "release\latest.yml")) { throw "latest.yml was not produced." }
