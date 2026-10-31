@@ -70,6 +70,9 @@ const mainDir = path.dirname(fileURLToPath(import.meta.url));
 const { autoUpdater } = electronUpdater;
 startAppLog();
 
+const UPDATE_CHECK_ERROR = "Update check failed.";
+const UPDATE_DOWNLOAD_ERROR = "Update download failed.";
+
 protocol.registerSchemesAsPrivileged([
   { scheme: "print", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
 ]);
@@ -134,17 +137,21 @@ function publishUpdate(patch) {
 
 function setupAutoUpdater() {
   if (!app.isPackaged) return;
+  autoUpdater.channel = currentConfig?.updateChannel || "stable";
+  autoUpdater.allowPrerelease = autoUpdater.channel === "nightly";
   autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.on("checking-for-update", () => publishUpdate({ status: "checking", error: "" }));
   autoUpdater.on("update-available", (info) => {
-    publishUpdate({ status: "downloading", version: info.version, progress: 0, error: "" });
-    autoUpdater.downloadUpdate().catch((error) => publishUpdate({ status: "error", error: error.message || "Update download failed." }));
+    publishUpdate({ status: "available", version: info.version, progress: 0, error: "" });
   });
   autoUpdater.on("update-not-available", () => publishUpdate({ status: "up-to-date", progress: 0, error: "" }));
   autoUpdater.on("download-progress", (progress) => publishUpdate({ status: "downloading", progress: Math.round(progress.percent || 0), error: "" }));
   autoUpdater.on("update-downloaded", (info) => publishUpdate({ status: "downloaded", version: info.version, progress: 100, error: "" }));
-  autoUpdater.on("error", (error) => publishUpdate({ status: "error", error: error.message || "Update check failed." }));
+  autoUpdater.on("error", (error) => {
+    console.error("update failed", error);
+    publishUpdate({ status: "error", error: UPDATE_CHECK_ERROR });
+  });
 }
 
 async function checkForUpdates() {
@@ -154,8 +161,9 @@ async function checkForUpdates() {
     await autoUpdater.checkForUpdates();
     return { ok: true };
   } catch (error) {
-    publishUpdate({ status: "error", error: error.message || "Update check failed." });
-    return { ok: false, error: error.message || "Update check failed." };
+    console.error("update check failed", error);
+    publishUpdate({ status: "error", error: UPDATE_CHECK_ERROR });
+    return { ok: false, error: UPDATE_CHECK_ERROR };
   }
 }
 
@@ -165,6 +173,17 @@ async function updateAction() {
     quitRequested = true;
     autoUpdater.quitAndInstall();
     return { ok: true };
+  }
+  if (updateState.status === "available") {
+    try {
+      publishUpdate({ status: "downloading", progress: 0, error: "" });
+      await autoUpdater.downloadUpdate();
+      return { ok: true };
+    } catch (error) {
+      console.error("update download failed", error);
+      publishUpdate({ status: "error", error: UPDATE_DOWNLOAD_ERROR });
+      return { ok: false, error: UPDATE_DOWNLOAD_ERROR };
+    }
   }
   return checkForUpdates();
 }
@@ -240,6 +259,7 @@ function publicConfig(config) {
     fingerprintDir: config.fingerprintDir,
     scanTimeoutSeconds: config.scanTimeoutSeconds,
     syncIntervalSeconds: config.syncIntervalSeconds,
+    updateChannel: config.updateChannel,
   };
 }
 
@@ -1626,9 +1646,14 @@ function registerIpc() {
         zk4500Cli: String(input?.zk4500Cli || "").trim() || prev.zk4500Cli,
         scanTimeoutSeconds: prev.scanTimeoutSeconds,
         syncIntervalSeconds: prev.syncIntervalSeconds,
+        updateChannel: input?.updateChannel === "nightly" ? "nightly" : "stable",
       });
       pause = false;
       await startLoop();
+      if (app.isPackaged) {
+        autoUpdater.channel = currentConfig?.updateChannel || "stable";
+        autoUpdater.allowPrerelease = autoUpdater.channel === "nightly";
+      }
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err.message };

@@ -62,6 +62,7 @@ function renderUpdate(updateState) {
   const labels = {
     idle: "Check for updates",
     checking: "Checking for updates…",
+    available: "Download update",
     "up-to-date": "Up to date",
     downloaded: "Restart to update",
     error: "Retry update",
@@ -252,6 +253,7 @@ function fillConfig(state) {
   document.querySelector("#cfg-gid").value = cfg.sheetGid ?? "";
   document.querySelector("#cfg-exe").value = cfg.zk4500Cli || "";
   document.querySelector("#cfg-dir").textContent = state.fingerprintDir || cfg.fingerprintDir || "";
+  for (const button of document.querySelectorAll("[data-track]")) button.setAttribute("aria-pressed", String(button.dataset.track === (cfg.updateChannel || "stable")));
   cancel.hidden = !state.canCloseSettings;
   chooseSettingsPage("general");
 }
@@ -673,12 +675,16 @@ document.querySelector("#save").addEventListener("click", async () => {
     spreadsheetId: document.querySelector("#cfg-sheet").value,
     sheetGid: document.querySelector("#cfg-gid").value,
     zk4500Cli: document.querySelector("#cfg-exe").value,
+    updateChannel: document.querySelector('[data-track][aria-pressed="true"]')?.dataset.track || "stable",
   });
   save.disabled = false;
   if (!result?.ok && result?.error) {
     error.hidden = false;
     error.textContent = translate(result.error);
   }
+});
+for (const button of document.querySelectorAll("[data-track]")) button.addEventListener("click", () => {
+  for (const candidate of document.querySelectorAll("[data-track]")) candidate.setAttribute("aria-pressed", String(candidate === button));
 });
 for (const tab of document.querySelectorAll("[data-settings-page]")) {
   tab.addEventListener("click", () => chooseSettingsPage(tab.dataset.settingsPage));

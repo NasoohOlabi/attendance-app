@@ -20,6 +20,7 @@ const DEFAULTS = {
   zk4500Cli: "",
   scanTimeoutSeconds: 20,
   syncIntervalSeconds: 60,
+  updateChannel: "stable",
 };
 
 function filled(value) {
@@ -105,6 +106,7 @@ export function loadConfig(options = {}) {
       env.SYNC_INTERVAL_SECONDS ?? file.syncIntervalSeconds,
       DEFAULTS.syncIntervalSeconds,
     ),
+    updateChannel: String(file.updateChannel || DEFAULTS.updateChannel).toLowerCase() === "nightly" ? "nightly" : "stable",
     configPath,
   };
 }

@@ -1,0 +1,58 @@
+name: Nightly Windows installer
+
+on:
+  push:
+    branches: [nightly]
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  nightly:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - name: Restore licensed scanner interop wrappers
+        shell: pwsh
+        env:
+          ZK4500_INTEROP_BUNDLE_B64: ${{ secrets.ZK4500_INTEROP_BUNDLE_B64 }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:ZK4500_INTEROP_BUNDLE_B64)) { throw "The ZK4500_INTEROP_BUNDLE_B64 secret is required." }
+          $zip = Join-Path $env:RUNNER_TEMP "zk4500-interop.zip"
+          [IO.File]::WriteAllBytes($zip, [Convert]::FromBase64String($env:ZK4500_INTEROP_BUNDLE_B64))
+          Expand-Archive $zip (Join-Path $env:RUNNER_TEMP "zk4500-interop") -Force
+          Copy-Item "$env:RUNNER_TEMP\zk4500-interop\AxInterop.ZKFPEngXControl.dll" scanner
+          Copy-Item "$env:RUNNER_TEMP\zk4500-interop\Interop.ZKFPEngXControl.dll" scanner
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run lint:history
+      - run: node node_modules/electron/install.js
+      - name: Set nightly version
+        shell: pwsh
+        run: |
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          $base = ($pkg.version -split '-')[0]
+          $pkg.version = "$base-nightly.${{ github.run_number }}"
+          $pkg | ConvertTo-Json -Depth 20 | Set-Content package.json
+      - name: Build and publish nightly installer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.WINDOWS_CODE_SIGNING_CERTIFICATE }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGNING_PASSWORD }}
+        run: bun run dist:publish
