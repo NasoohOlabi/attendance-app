@@ -139,12 +139,17 @@ function publishUpdate(patch) {
 
 function configureAutoUpdater() {
   const configuredChannel = currentConfig?.updateChannel;
-  autoUpdater.channel = updaterChannel({ configuredChannel, currentVersion: app.getVersion() });
-  autoUpdater.allowPrerelease = autoUpdater.channel === "nightly";
+  const logicalChannel = updaterChannel({ configuredChannel, currentVersion: app.getVersion() });
+  // electron-builder publishes the feed as latest.yml for both release types.
+  // Keep prerelease selection separate from the feed filename so custom
+  // channels do not make electron-updater request stable.yml/nightly.yml.
+  autoUpdater.channel = undefined;
+  autoUpdater.allowPrerelease = logicalChannel === "nightly";
   console.info("updater configured", {
     currentVersion: app.getVersion(),
     configuredChannel,
-    channel: autoUpdater.channel,
+    channel: logicalChannel,
+    feedFile: "latest.yml",
     allowPrerelease: autoUpdater.allowPrerelease,
   });
 }
@@ -155,7 +160,7 @@ function setupAutoUpdater() {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.on("checking-for-update", () => {
-    console.info("updater checking", { channel: autoUpdater.channel });
+    console.info("updater checking", { allowPrerelease: autoUpdater.allowPrerelease, feedFile: "latest.yml" });
     publishUpdate({ status: "checking", error: "" });
   });
   autoUpdater.on("update-available", (info) => {
@@ -211,7 +216,7 @@ async function updateAction() {
     try {
       updateProgressLog = -1;
       publishUpdate({ status: "downloading", progress: 0, error: "" });
-      console.info("updater download requested", { version: updateState.version || "", channel: autoUpdater.channel });
+      console.info("updater download requested", { version: updateState.version || "", feedFile: "latest.yml" });
       await autoUpdater.downloadUpdate();
       console.info("updater download completed", { status: updateState.status, version: updateState.version || "" });
       return { ok: true };
