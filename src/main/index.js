@@ -198,7 +198,11 @@ function attendanceTrend(rows) {
     count: grid.students.reduce((total, student) => {
       const value = rows[student.rowNumber - 1]?.[index];
       const text = String(value ?? "").trim().toLowerCase();
-      return total + (value === true || text === "true" || text === "حاضر" || text === "Ø­Ø§Ø¶Ø±" ? 1 : 0);
+      // Sheets can return checkbox values as booleans, TRUE/1, or the
+      // custom checked value depending on the value render mode and API path.
+      const present = value === true || text === "true" || text === "1"
+        || text === "yes" || text === "حاضر" || text === "Ø­Ø§Ø¶Ø±";
+      return total + (present ? 1 : 0);
     }, 0),
   }));
 }
