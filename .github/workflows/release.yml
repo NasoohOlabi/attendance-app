@@ -4,7 +4,6 @@ on:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -13,17 +12,18 @@ jobs:
   release:
     runs-on: windows-latest
     timeout-minutes: 45
+    environment: release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: 9.0.x
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.0
       - name: Restore licensed scanner interop wrappers
@@ -43,12 +43,29 @@ jobs:
       - run: bun run lint
       - run: bun run lint:history
       - run: node node_modules/electron/install.js
-      - name: Build and publish installer
+      - name: Require release signing credentials
+        shell: pwsh
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bun run dist:publish
+          WINDOWS_CODE_SIGNING_CERTIFICATE: ${{ secrets.WINDOWS_CODE_SIGNING_CERTIFICATE }}
+          WINDOWS_CODE_SIGNING_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGNING_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CODE_SIGNING_CERTIFICATE) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_CODE_SIGNING_PASSWORD)) {
+            throw "The release environment must provide WINDOWS_CODE_SIGNING_CERTIFICATE and WINDOWS_CODE_SIGNING_PASSWORD."
+          }
+      - name: Build signed installer
+        env:
+          CSC_LINK: ${{ secrets.WINDOWS_CODE_SIGNING_CERTIFICATE }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGNING_PASSWORD }}
+        run: bun run dist:package
       - name: Verify release artifacts
         shell: pwsh
         run: |
           if (!(Test-Path "release\Masjid-Attendance-Setup.exe")) { throw "Installer was not produced." }
           if (!(Test-Path "release\latest.yml")) { throw "latest.yml was not produced." }
+          $signature = Get-AuthenticodeSignature -LiteralPath "release\Masjid-Attendance-Setup.exe"
+          if ($signature.Status -ne "Valid") { throw "Installer Authenticode signature is not valid: $($signature.Status)" }
+          bun run verify:update
+      - name: Publish verified release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bun run publish:verified
