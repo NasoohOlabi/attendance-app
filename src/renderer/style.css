@@ -139,6 +139,7 @@ header {
   padding-right: max(40px, calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%)));
   background: var(--bg);
   -webkit-app-region: drag;
+  direction: ltr;
 }
 header button { -webkit-app-region: no-drag; }
 .top-left { position: absolute; left: max(40px, env(titlebar-area-x, 0px)); }

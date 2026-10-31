@@ -178,7 +178,7 @@ function paintPendingGallery(images, singleUrl, locked) {
 }
 
 function show(name) {
-  ready.hidden = name !== "ready";
+  ready.hidden = dashboardOpen || name !== "ready";
   pending.hidden = name !== "pending";
   config.hidden = name !== "config";
   settings.hidden = name === "config" || linking;
