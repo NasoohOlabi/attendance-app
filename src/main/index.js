@@ -1564,6 +1564,21 @@ function registerIpc() {
       return { ok: false, error: err.message };
     }
   });
+  ipcMain.handle("syncStudents", async () => {
+    try {
+      if (!currentConfig || !client) throw new Error("The sheet is not available.");
+      await exclusive(async () => {
+        publish({ syncNote: "Loading students…", error: "" });
+        await reloadStudents(currentConfig);
+        publish({ syncNote: `Synced ${new Date().toLocaleTimeString()}` });
+      });
+      return { ok: true };
+    } catch (err) {
+      const message = err?.message || "The sheet is not available.";
+      publish({ syncNote: message, error: message });
+      return { ok: false, error: message };
+    }
+  });
   ipcMain.handle("undoAttendance", async (_event, input) => {
     if (!currentConfig) return { ok: false, error: "The sheet is not available." };
     return acceptAbsent(Number(input?.rowNumber), Number(input?.logRow) || 0);

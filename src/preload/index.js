@@ -19,4 +19,5 @@ contextBridge.exposeInMainWorld("attendance", {
   undoAttendance: (input) => ipcRenderer.invoke("undoAttendance", input),
   setAttendanceTime: (input) => ipcRenderer.invoke("setAttendanceTime", input),
   closeSettings: () => ipcRenderer.invoke("closeSettings"),
+  syncStudents: () => ipcRenderer.invoke("syncStudents"),
 });

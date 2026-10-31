@@ -53,6 +53,7 @@ const AR = {
   "Sheet gid": "معرّف الورقة",
   "Prints are stored in": "البصمات محفوظة في",
   "Delete all fingerprints": "احذف كل البصمات",
+  "Sync student list": "?????? ????? ??????",
   Save: "حفظ",
   Cancel: "إلغاء",
   "Drop these scans?": "إلغاء هذه المسحات؟",

@@ -37,6 +37,7 @@ const confirmName = document.querySelector("#confirm-name");
 const confirmDetail = document.querySelector("#confirm-detail");
 const confirmCancel = document.querySelector("#confirm-cancel");
 const confirmOk = document.querySelector("#confirm-ok");
+const syncStudents = document.querySelector("#sync-students");
 
 let picker = false;
 let configOpen = false;
@@ -206,6 +207,16 @@ function fillConfig(state) {
   cancel.hidden = !state.canCloseSettings;
   chooseSettingsPage("general");
 }
+
+syncStudents.addEventListener("click", async () => {
+  syncStudents.disabled = true;
+  const result = await window.attendance.syncStudents();
+  syncStudents.disabled = false;
+  if (!result?.ok && result?.error) {
+    error.hidden = false;
+    error.textContent = translate(result.error);
+  }
+});
 
 function chooseSettingsPage(page) {
   document.querySelector("#settings-general").hidden = page !== "general";
