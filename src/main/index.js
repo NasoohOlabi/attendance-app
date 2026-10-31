@@ -135,10 +135,18 @@ function publishUpdate(patch) {
   publish({ update: { ...updateState } });
 }
 
+function configureAutoUpdater() {
+  const configuredChannel = currentConfig?.updateChannel === "nightly" ? "nightly" : "stable";
+  const versionChannel = /-nightly(?:\.|$)/i.test(app.getVersion()) ? "nightly" : "stable";
+  autoUpdater.channel = configuredChannel === "nightly" || versionChannel === "nightly"
+    ? "nightly"
+    : "stable";
+  autoUpdater.allowPrerelease = autoUpdater.channel === "nightly";
+}
+
 function setupAutoUpdater() {
   if (!app.isPackaged) return;
-  autoUpdater.channel = currentConfig?.updateChannel || "stable";
-  autoUpdater.allowPrerelease = autoUpdater.channel === "nightly";
+  configureAutoUpdater();
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.on("checking-for-update", () => publishUpdate({ status: "checking", error: "" }));
@@ -1655,8 +1663,7 @@ function registerIpc() {
       pause = false;
       await startLoop();
       if (app.isPackaged) {
-        autoUpdater.channel = currentConfig?.updateChannel || "stable";
-        autoUpdater.allowPrerelease = autoUpdater.channel === "nightly";
+        configureAutoUpdater();
       }
       return { ok: true };
     } catch (err) {
