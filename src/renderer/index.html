@@ -19,6 +19,7 @@
   <body>
     <div class="app">
       <header>
+        <button id="dashboard" class="ghost top-left" type="button" data-i18n="Dashboard">Dashboard</button>
         <p class="kicker" data-i18n="Attendance">Attendance</p>
         <button id="settings" class="ghost" type="button" data-i18n="Settings">Settings</button>
       </header>
@@ -64,6 +65,17 @@
           <p id="today-empty" class="today-empty" data-i18n="Loading the sheet">Loading the sheet</p>
           <ol id="today-list" class="today-list"></ol>
         </aside>
+      </section>
+      <section id="dashboard-view" hidden>
+        <div class="dashboard-head">
+          <div>
+            <p class="kicker" data-i18n="Attendance trends">Attendance trends</p>
+            <h1 data-i18n="By day">By day</h1>
+          </div>
+          <button id="dashboard-close" class="secondary" type="button" data-i18n="Back">Back</button>
+        </div>
+        <div id="trend" class="trend"></div>
+        <p id="trend-empty" class="detail" data-i18n="No attendance history yet." hidden>No attendance history yet.</p>
       </section>
       <section id="pending" hidden>
         <div class="hero">

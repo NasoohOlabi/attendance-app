@@ -113,7 +113,23 @@ let state = {
   canCloseSettings: false,
   enroll: null,
   present: null,
+  dashboard: [],
 };
+
+function attendanceTrend(rows) {
+  const grid = parseAttendanceGrid(rows);
+  const columns = grid.header
+    .map((value, index) => ({ label: String(value || "").trim(), index }))
+    .filter(({ label }) => /^(?:(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+)?\d{1,2}\/\d{1,2}$/.test(label));
+  return columns.slice(-14).map(({ label, index }) => ({
+    label,
+    count: grid.students.reduce((total, student) => {
+      const value = rows[student.rowNumber - 1]?.[index];
+      const text = String(value ?? "").trim().toLowerCase();
+      return total + (value === true || text === "true" || text === "حاضر" || text === "Ø­Ø§Ø¶Ø±" ? 1 : 0);
+    }, 0),
+  }));
+}
 
 function configOptions() {
   if (!app.isPackaged) return {};
@@ -283,7 +299,7 @@ async function reloadStudents(config) {
   await saveIndex(config.fingerprintDir, merged);
   cacheFromSheet(merged, rows);
   sheetPeople = await timesFor(config, presentToday(rows, new Date()));
-  publish({ present: shownPresent() });
+  publish({ present: shownPresent(), dashboard: attendanceTrend(rows) });
   return { merged, rows, title };
 }
 

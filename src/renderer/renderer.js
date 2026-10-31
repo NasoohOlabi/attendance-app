@@ -38,6 +38,11 @@ const confirmDetail = document.querySelector("#confirm-detail");
 const confirmCancel = document.querySelector("#confirm-cancel");
 const confirmOk = document.querySelector("#confirm-ok");
 const syncStudents = document.querySelector("#sync-students");
+const dashboard = document.querySelector("#dashboard");
+const dashboardView = document.querySelector("#dashboard-view");
+const dashboardClose = document.querySelector("#dashboard-close");
+const trend = document.querySelector("#trend");
+const trendEmpty = document.querySelector("#trend-empty");
 
 let picker = false;
 let configOpen = false;
@@ -47,6 +52,28 @@ let batchAssign = false;
 let listLoading = false;
 let lastState = null;
 let confirmRequest = null;
+let dashboardOpen = false;
+
+function renderDashboard(days) {
+  trend.replaceChildren();
+  const values = Array.isArray(days) ? days : [];
+  trendEmpty.hidden = values.length !== 0;
+  const max = Math.max(1, ...values.map((day) => Number(day.count) || 0));
+  for (const day of values) {
+    const item = document.createElement("div");
+    item.className = "trend-day";
+    const bar = document.createElement("div");
+    bar.className = "trend-bar";
+    bar.style.height = `${Math.max(4, ((Number(day.count) || 0) / max) * 100)}%`;
+    bar.title = `${day.label}: ${day.count}`;
+    const count = document.createElement("strong");
+    count.textContent = day.count;
+    const label = document.createElement("span");
+    label.textContent = day.label;
+    item.append(bar, count, label);
+    trend.append(item);
+  }
+}
 
 function setFinger(img, url, show) {
   if (!show || !url) {
@@ -155,6 +182,8 @@ function show(name) {
   pending.hidden = name !== "pending";
   config.hidden = name !== "config";
   settings.hidden = name === "config" || linking;
+  dashboard.hidden = dashboardOpen || name !== "ready";
+  dashboardView.hidden = !dashboardOpen;
   ready.classList.toggle("ready", name === "ready");
 }
 
@@ -463,6 +492,8 @@ function render(state) {
   batchAssign = Boolean(state.enroll?.count);
   show(mode);
   renderToday(state.present);
+  renderDashboard(state.dashboard);
+  if (dashboardOpen) return;
   if (mode === "ready") {
     headline.textContent = translate(state.headline || "Place a finger");
     detail.textContent = translate(state.detail || "Listening");
@@ -525,6 +556,15 @@ function render(state) {
   error.textContent = translate(state.error || "");
   sync.textContent = translate(state.syncNote || "");
 }
+
+dashboard.addEventListener("click", () => {
+  dashboardOpen = true;
+  show("ready");
+});
+dashboardClose.addEventListener("click", () => {
+  dashboardOpen = false;
+  show("ready");
+});
 
 search.addEventListener("input", () => refreshList());
 search.addEventListener("keydown", (event) => {
