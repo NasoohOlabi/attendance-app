@@ -112,7 +112,8 @@
           <button id="settings-account-tab" class="secondary" type="button" role="tab" aria-controls="settings-account" aria-selected="false" data-settings-page="account" data-i18n="Service account">Service account</button>
         </nav>
         <div id="settings-general" class="settings-page" role="tabpanel" aria-labelledby="settings-general-tab">
-        <div class="field">
+        <div class="settings-form-grid">
+        <div class="field field-wide">
           <span id="language-label" data-i18n="Language">Language</span>
           <div class="lang" role="group" dir="ltr" aria-labelledby="language-label">
             <button id="lang-en" class="secondary" type="button" data-lang="en" aria-pressed="true">English</button>
@@ -127,7 +128,7 @@
           </div>
           <p class="detail" data-i18n="Nightly receives pre-release builds first.">Nightly receives pre-release builds first.</p>
         </div>
-        <div class="field">
+        <div class="field field-wide">
           <span id="font-label" data-i18n="Arabic font">Arabic font</span>
           <div class="fonts" role="group" dir="ltr" aria-labelledby="font-label">
             <button class="secondary" type="button" data-font="cairo" aria-pressed="true">Cairo</button>
@@ -142,15 +143,18 @@
         <label class="field"><span data-i18n="Sheet gid">Sheet gid</span>
           <input id="cfg-gid" type="text" inputmode="numeric" dir="ltr" />
         </label>
-        <label class="field"><span>zk4500.exe</span>
+        <label class="field field-wide"><span>zk4500.exe</span>
           <span class="file-row">
             <input id="cfg-exe" type="text" dir="ltr" />
             <button class="secondary browse" type="button" data-pick="exe" data-target="cfg-exe" data-i18n="Browse">Browse</button>
           </span>
         </label>
-        <p class="detail"><span data-i18n="Prints are stored in">Prints are stored in</span> <span id="cfg-dir" dir="ltr"></span></p>
-        <button id="sync-students" class="secondary" type="button" data-i18n="Sync student list">Sync student list</button>
-        <button id="clear-prints" class="danger" type="button" data-i18n="Delete all fingerprints">Delete all fingerprints</button>
+        <p class="detail field-wide"><span data-i18n="Prints are stored in">Prints are stored in</span> <span id="cfg-dir" dir="ltr"></span></p>
+        <div class="settings-inline-actions field-wide">
+          <button id="sync-students" class="secondary" type="button" data-i18n="Sync student list">Sync student list</button>
+          <button id="clear-prints" class="danger" type="button" data-i18n="Delete all fingerprints">Delete all fingerprints</button>
+        </div>
+        </div>
         </div>
         <div id="settings-account" class="settings-page" role="tabpanel" aria-labelledby="settings-account-tab" hidden>
           <div class="account-card">
