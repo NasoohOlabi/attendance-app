@@ -19,11 +19,22 @@
   <body>
     <div class="app">
       <header>
-        <button id="dashboard" class="ghost top-left" type="button" data-i18n="Dashboard">Dashboard</button>
-        <p class="kicker" data-i18n="Attendance">Attendance</p>
+        <div class="header-brand">
+          <button id="dashboard" class="ghost nav-link" type="button">
+            <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 13h8V3H3v10Zm10 8h8V3h-8v18ZM3 21h8v-6H3v6Z"/></svg>
+            <span data-i18n="Dashboard">Dashboard</span>
+          </button>
+        </div>
+        <p class="kicker header-title" data-i18n="Attendance">Attendance</p>
         <div class="header-actions">
-          <button id="update" class="ghost update-button" type="button" data-i18n="Check for updates" hidden>Check for updates</button>
-          <button id="settings" class="ghost" type="button" data-i18n="Settings">Settings</button>
+          <button id="update" class="ghost nav-link update-button" type="button" hidden>
+            <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0 2 5.3M20 4v7h-7"/></svg>
+            <span data-i18n="Check for updates">Check for updates</span>
+          </button>
+          <button id="settings" class="ghost nav-link" type="button">
+            <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9.7 3.8.4-1.3h3.8l.4 1.3 1.5.6 1.2-.7 2.7 2.7-.7 1.2.6 1.5 1.3.4v3.8l-1.3.4-.6 1.5.7 1.2-2.7 2.7-1.2-.7-1.5.6-.4 1.3h-3.8l-.4-1.3-1.5-.6-1.2.7-2.7-2.7.7-1.2-.6-1.5-1.3-.4V9.5l1.3-.4.6-1.5-.7-1.2 2.7-2.7 1.2.7 1.5-.6ZM12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/></svg>
+            <span data-i18n="Settings">Settings</span>
+          </button>
         </div>
       </header>
       <section id="ready" class="hero">
