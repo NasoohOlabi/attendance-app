@@ -27,7 +27,8 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run lint
       - run: bun run lint:history
-      - run: bun audit
+      - name: Audit dependencies
+        run: bun audit --audit-level=high
       - run: node node_modules/electron/install.js
       - run: bun run test
       - run: bun run test:e2e

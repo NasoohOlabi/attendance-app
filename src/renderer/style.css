@@ -106,6 +106,20 @@
   --danger: #8c3a2f;
 }
 * { box-sizing: border-box; }
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #c9bfb4 transparent;
+}
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: #c9bfb4;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: #a99e91; background-clip: content-box; }
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 html, body { height: 100%; margin: 0; overflow: hidden; }
 body {
   font-family: "Segoe UI", sans-serif;
@@ -118,7 +132,7 @@ button { cursor: pointer; }
 .app {
   height: 100%;
   min-height: 0;
-  padding: 64px 40px 16px;
+  padding: 64px clamp(24px, 5vw, 72px) 16px;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -559,14 +573,18 @@ header .top-left + .kicker { margin: 0 auto; }
   gap: 12px;
   min-height: 0;
   flex: 1;
-  width: min(760px, 100%);
-  max-width: 760px;
+  width: min(1120px, 100%);
+  max-width: 1120px;
   align-self: center;
   overflow: hidden;
 }
+#pending {
+  width: min(760px, 100%);
+  max-width: 760px;
+}
 #config {
   overflow: auto;
-  padding-inline: 12px;
+  padding-inline: clamp(0px, 1vw, 16px);
   gap: 6px;
 }
 #config .hero h1 { font-size: 28px; }
@@ -680,6 +698,19 @@ input[type="text"], input[type="search"] {
 .settings-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
 .settings-tabs [aria-selected="true"] { background: #ded6cb; color: #221e19; }
 .settings-page { display: flex; flex-direction: column; gap: 12px; }
+.settings-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 24px;
+  align-content: start;
+}
+.field-wide { grid-column: 1 / -1; }
+.settings-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.settings-inline-actions > button { flex: 1 1 220px; }
 .account-card { padding: 18px; border: 1px solid #d8d0c5; border-radius: 12px; background: rgba(255,255,255,.4); }
 .account-card h2 { margin: 0 0 8px; font-size: 20px; }
 .account-card .primary { margin-block: 12px; }
@@ -702,6 +733,7 @@ input[type="text"], input[type="search"] {
   width: min(760px, 100%);
   align-self: center;
 }
+.app:has(#config:not([hidden])) footer { width: min(1120px, 100%); }
 .lang {
   display: flex;
   gap: 8px;
@@ -749,5 +781,9 @@ footer {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+@media (max-width: 760px) {
+  .app { padding-inline: 24px; }
+  .settings-form-grid { grid-template-columns: 1fr; gap: 14px; }
 }
 [hidden] { display: none !important; }
