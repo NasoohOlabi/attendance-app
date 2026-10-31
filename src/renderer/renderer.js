@@ -67,9 +67,10 @@ function renderUpdate(updateState) {
     downloaded: "Restart to update",
     error: "Retry update",
   };
-  update.textContent = info.status === "downloading"
+  const label = info.status === "downloading"
     ? `${translate("Downloading update…")} ${Math.max(0, Number(info.progress) || 0)}%`
     : translate(labels[info.status] || labels.idle);
+  update.querySelector("span").textContent = label;
   update.disabled = info.status === "checking" || info.status === "downloading";
   update.title = info.error || "";
 }
