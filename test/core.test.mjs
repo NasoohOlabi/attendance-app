@@ -1083,7 +1083,7 @@ test("the installed profile stays in the captured directory", () => {
   assert.equal(pkg.build.nsis.shortcutName, "Masjid Attendance");
   assert.equal(pkg.build.nsis.uninstallDisplayName, "Masjid Attendance");
   assert.equal(pkg.build.nsis.guid, "2febcda6-3658-5c7c-9dfa-528fe71d9a9a");
-  assert.deepEqual(pkg.build.publish, { provider: "github", releaseType: "release" });
+  assert.deepEqual(pkg.build.publish, { provider: "github", owner: "NasoohOlabi", repo: "attendance-app", releaseType: "release" });
   assert.match(pkg.scripts["dist:publish"], /publish:verified/);
   assert.match(pkg.scripts["publish:verified"], /publish-verified/);
   assert.equal(pkg.build.extraResources[0].from, "staging/scanner");

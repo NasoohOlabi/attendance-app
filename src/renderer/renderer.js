@@ -637,10 +637,17 @@ document.querySelector("#enroll-done").addEventListener("click", () => window.at
 settings.addEventListener("click", () => window.attendance.openSettings());
 update.addEventListener("click", async () => {
   update.disabled = true;
-  const result = await window.attendance.updateAction();
-  if (!result?.ok && result?.error) {
+  try {
+    const result = await window.attendance.updateAction();
+    if (!result?.ok && result?.error) {
+      error.hidden = false;
+      error.textContent = translate(result.error);
+    }
+  } catch (err) {
     error.hidden = false;
-    error.textContent = translate(result.error);
+    error.textContent = translate("Update check failed.");
+  } finally {
+    update.disabled = false;
   }
 });
 cancel.addEventListener("click", () => window.attendance.closeSettings());

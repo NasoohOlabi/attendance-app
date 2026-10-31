@@ -83,6 +83,8 @@
     },
     "publish": {
       "provider": "github",
+      "owner": "NasoohOlabi",
+      "repo": "attendance-app",
       "releaseType": "release"
     }
   }
