@@ -335,7 +335,27 @@ async function writeConfigFile(config, patch) {
   delete next.driveFolderId;
   delete next.driveSync;
   await mkdir(path.dirname(config.configPath), { recursive: true });
-  await writeFile(config.configPath, `${JSON.stringify(next, null, 2)}\n`);
+  const temp = `${config.configPath}.${process.pid}.tmp`;
+  await writeFile(temp, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  await rename(temp, config.configPath);
+}
+
+async function applyUpdateChannelPreference(config) {
+  try {
+    const saved = JSON.parse(await readFile(updateChannelPreferencePath(app.getPath("appData")), "utf8"));
+    if (saved.channel === "nightly" || saved.channel === "stable") config.updateChannel = saved.channel;
+  } catch (error) {
+    if (error.code !== "ENOENT") console.error("update channel preference failed", error.message);
+  }
+  return config;
+}
+
+async function saveUpdateChannelPreference(channel) {
+  const file = updateChannelPreferencePath(app.getPath("appData"));
+  await mkdir(path.dirname(file), { recursive: true });
+  const temp = `${file}.${process.pid}.tmp`;
+  await writeFile(temp, `${JSON.stringify({ channel })}\n`, "utf8");
+  await rename(temp, file);
 }
 
 function cacheStudents(students) {
