@@ -74,7 +74,11 @@ export function loadConfig(options = {}) {
 
   let file = {};
   if (existsSync(configPath)) {
-    file = JSON.parse(readFileSync(configPath, "utf8"));
+    try {
+      file = JSON.parse(readFileSync(configPath, "utf8"));
+    } catch (error) {
+      throw new Error(`The settings file is corrupted or incomplete. Open Settings and save again. (${error.message})`);
+    }
   }
   const baseDir = path.dirname(configPath);
 
