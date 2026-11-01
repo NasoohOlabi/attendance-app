@@ -522,6 +522,9 @@ function renderProfile(fields) {
 
 function render(state) {
   lastState = state;
+  // Keep the installed build visible even when settings was already open.
+  const version = document.querySelector("#app-version");
+  if (version) version.textContent = state.appVersion || state.update?.version || "—";
   renderUpdate(state.update);
   renderServiceAccount(state);
   const mode = screenForPhase(state.phase);
