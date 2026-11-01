@@ -340,22 +340,6 @@ async function saveUpdateChannelPreference(channel) {
   await rename(temp, file);
 }
 
-async function applyUpdateChannelPreference(config) {
-  try {
-    const saved = JSON.parse(await readFile(updateChannelPreferencePath(app.getPath("appData")), "utf8"));
-    if (saved.channel === "nightly" || saved.channel === "stable") config.updateChannel = saved.channel;
-  } catch (error) {
-    if (error.code !== "ENOENT") console.error("update channel preference failed", error.message);
-  }
-  return config;
-}
-
-async function saveUpdateChannelPreference(channel) {
-  const file = updateChannelPreferencePath(app.getPath("appData"));
-  await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, `${JSON.stringify({ channel })}\n`);
-}
-
 function cacheStudents(students) {
   cached = {};
   for (const student of Object.values(students || {})) {
