@@ -817,3 +817,4 @@ footer {
   .settings-form-grid { grid-template-columns: 1fr; gap: 14px; }
 }
 [hidden] { display: none !important; }
+.app-version { display: inline-flex; gap: 8px; align-items: center; margin: 8px 0 0; color: var(--muted); } .app-version strong { color: var(--ink); font-variant-numeric: tabular-nums; }
