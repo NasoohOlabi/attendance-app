@@ -7,6 +7,7 @@ import test from "node:test";
 import { legacyUserDataPath, LEGACY_USER_DATA_DIR, loadConfig, requireGoogleConfig } from "../src/config.mjs";
 import { appendAppLog, appLogFile, appLogLine } from "../src/log.mjs";
 import { updaterChannel, updaterErrorDetails, updaterInfoDetails } from "../src/update.mjs";
+import { attendanceTrend } from "../src/trend.mjs";
 import { attendanceCellUpdate, createGoogle, explainApiFailure, isOfflineError } from "../src/google.mjs";
 import { translate } from "../src/renderer/i18n.js";
 import { fingerCue, presentTrace, screenForPhase } from "../src/renderer/view.js";
@@ -306,6 +307,20 @@ test("today's tally is the حاضر names in today's column", () => {
     "18:09",
   );
   assert.equal(withScanTimes(people, {}, { "اسم أول": "09:00" }).filter((item) => item.name === "اسم أول").every((item) => item.time === ""), true);
+});
+
+test("attendance trend excludes future sheet dates", () => {
+  const rows = [
+    ["إسم كامل", "معرف", "Sat 10/10", "Sat 17/10", "Sat 24/10", "Sat 31/10", "Sat 7/11", "Sat 14/11"],
+    ["", "", "1", "0", "1", "0", "0", "0"],
+    ["اسم أول", "00 00 000 001", "حاضر", "", "حاضر", "", "", ""],
+  ];
+  assert.deepEqual(attendanceTrend(rows, new Date(2026, 10, 1)), [
+    { label: "Sat 10/10", count: 1 },
+    { label: "Sat 17/10", count: 0 },
+    { label: "Sat 24/10", count: 1 },
+    { label: "Sat 31/10", count: 0 },
+  ]);
 });
 
 test("date headers resolve to a column, including a bare day/month", () => {

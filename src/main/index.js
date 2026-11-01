@@ -24,6 +24,7 @@ import {
   writeSheetValues,
 } from "../google.mjs";
 import { appendScanTrace, beginScanAttempt, mergeCapturedFiles, planScanRetry, runIdentify, SCAN_OUTAGE_MESSAGE, SCAN_RETRY_PAUSE_MS } from "../scan.mjs";
+import { attendanceTrend } from "../trend.mjs";
 import {
   captureScreen,
   findDateColumn,
@@ -227,25 +228,6 @@ async function updateAction() {
     }
   }
   return checkForUpdates();
-}
-
-function attendanceTrend(rows) {
-  const grid = parseAttendanceGrid(rows);
-  const columns = grid.header
-    .map((value, index) => ({ label: String(value || "").trim(), index }))
-    .filter(({ label }) => /^(?:(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+)?\d{1,2}\/\d{1,2}$/.test(label));
-  return columns.slice(-14).map(({ label, index }) => ({
-    label,
-    count: grid.students.reduce((total, student) => {
-      const value = rows[student.rowNumber - 1]?.[index];
-      const text = String(value ?? "").trim().toLowerCase();
-      // Sheets can return checkbox values as booleans, TRUE/1, or the
-      // custom checked value depending on the value render mode and API path.
-      const present = value === true || text === "true" || text === "1"
-        || text === "yes" || text === "حاضر" || text === "Ø­Ø§Ø¶Ø±";
-      return total + (present ? 1 : 0);
-    }, 0),
-  }));
 }
 
 function configOptions() {
