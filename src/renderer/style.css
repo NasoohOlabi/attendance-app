@@ -132,7 +132,7 @@ button { cursor: pointer; }
 .app {
   height: 100%;
   min-height: 0;
-  padding: 64px clamp(24px, 5vw, 72px) 16px;
+  padding: 32px clamp(24px, 5vw, 72px) 16px 280px;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -143,23 +143,25 @@ header {
   top: 0;
   left: 0;
   z-index: 2;
-  width: 100%;
-  height: 48px;
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) auto minmax(180px, 1fr);
-  align-items: center;
-  /* Caption buttons stay on the physical right, so this padding does not follow dir. */
-  padding-left: max(28px, env(titlebar-area-x, 0px));
-  padding-right: max(28px, calc(100% - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100%)));
-  background: var(--bg);
+  width: 232px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 28px;
+  padding: 28px 16px;
+  border-right: 1px solid var(--line);
+  background: color-mix(in srgb, var(--card) 72%, var(--bg));
   -webkit-app-region: drag;
   direction: ltr;
 }
 header button { -webkit-app-region: no-drag; }
-.header-brand { justify-self: start; }
-.header-title { justify-self: center; }
-.header-actions { justify-self: end; display: flex; align-items: center; gap: 24px; }
-.update-button { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.header-brand { display: flex; align-items: center; padding: 0 10px 14px; border-bottom: 1px solid var(--line); }
+.header-title { order: -1; margin: 0 10px; text-align: left; }
+.header-actions { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+.header-actions .nav-link, .header-brand .nav-link { width: 100%; justify-content: flex-start; padding: 10px 12px; border-radius: 9px; }
+.header-actions .nav-link:hover, .header-brand .nav-link:hover { background: var(--bg); color: var(--ink); }
+.update-button { max-width: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .update-dialog { position: fixed; z-index: 20; top: 58px; right: 28px; width: min(360px, calc(100vw - 56px)); }
 .update-dialog-card { padding: 16px 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); box-shadow: 0 12px 36px rgb(34 30 25 / 14%); }
 .update-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -795,15 +797,23 @@ footer {
 }
 @media (max-width: 760px) {
   header {
-    grid-template-columns: auto 1fr auto;
-    padding-inline: 18px;
+    width: 100%;
+    height: 52px;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 18px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
   }
-  .header-title { justify-self: center; }
-  .header-actions { gap: 12px; }
+  .header-brand { padding: 0; border: 0; }
+  .header-title { order: 0; flex: 1; text-align: center; }
+  .header-actions { flex-direction: row; gap: 8px; }
+  .header-actions .nav-link, .header-brand .nav-link { width: auto; padding: 6px; }
   .nav-link { gap: 5px; }
   .nav-icon { width: 15px; height: 15px; }
   .header-brand .nav-link span { display: none; }
-  .app { padding-inline: 24px; }
+  .app { padding: 64px 24px 16px; }
   .settings-form-grid { grid-template-columns: 1fr; gap: 14px; }
 }
 [hidden] { display: none !important; }
