@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, safeStorage } from "electron";
 import electronUpdater from "electron-updater";
 import { createCredentialStore, credentialFile } from "../credentials.mjs";
-import { legacyUserDataPath, loadConfig, scannerExeInResources } from "../config.mjs";
+import { legacyUserDataPath, loadConfig, scannerExeInResources, updateChannelPreferencePath } from "../config.mjs";
 import { appLogFile, startAppLog } from "../log.mjs";
 import { updaterChannel, updaterErrorDetails, updaterInfoDetails } from "../update.mjs";
 import {
@@ -318,6 +318,22 @@ async function writeConfigFile(config, patch) {
   delete next.driveSync;
   await mkdir(path.dirname(config.configPath), { recursive: true });
   await writeFile(config.configPath, `${JSON.stringify(next, null, 2)}\n`);
+}
+
+async function applyUpdateChannelPreference(config) {
+  try {
+    const saved = JSON.parse(await readFile(updateChannelPreferencePath(app.getPath("appData")), "utf8"));
+    if (saved.channel === "nightly" || saved.channel === "stable") config.updateChannel = saved.channel;
+  } catch (error) {
+    if (error.code !== "ENOENT") console.error("update channel preference failed", error.message);
+  }
+  return config;
+}
+
+async function saveUpdateChannelPreference(channel) {
+  const file = updateChannelPreferencePath(app.getPath("appData"));
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, `${JSON.stringify({ channel })}\n`);
 }
 
 function cacheStudents(students) {
@@ -1194,7 +1210,7 @@ async function startLoop() {
 
   let config;
   try {
-    config = loadConfig(configOptions());
+    config = await applyUpdateChannelPreference(loadConfig(configOptions()));
   } catch (err) {
     publish({
       phase: "ready",
@@ -1675,6 +1691,7 @@ function registerIpc() {
         syncIntervalSeconds: prev.syncIntervalSeconds,
         updateChannel: input?.updateChannel === "nightly" ? "nightly" : "stable",
       });
+      await saveUpdateChannelPreference(input?.updateChannel === "nightly" ? "nightly" : "stable");
       pause = false;
       await startLoop();
       if (app.isPackaged) {
