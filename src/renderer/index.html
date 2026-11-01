@@ -19,11 +19,22 @@
   <body>
     <div class="app">
       <header>
-        <button id="dashboard" class="ghost top-left" type="button" data-i18n="Dashboard">Dashboard</button>
-        <p class="kicker" data-i18n="Attendance">Attendance</p>
+        <div class="header-brand">
+          <button id="dashboard" class="ghost nav-link" type="button">
+            <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 13h8V3H3v10Zm10 8h8V3h-8v18ZM3 21h8v-6H3v6Z"/></svg>
+            <span data-i18n="Dashboard">Dashboard</span>
+          </button>
+        </div>
+        <p class="kicker header-title" data-i18n="Attendance">Attendance</p>
         <div class="header-actions">
-          <button id="update" class="ghost update-button" type="button" data-i18n="Check for updates" hidden>Check for updates</button>
-          <button id="settings" class="ghost" type="button" data-i18n="Settings">Settings</button>
+          <button id="update" class="ghost nav-link update-button" type="button" hidden>
+            <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0 2 5.3M20 4v7h-7"/></svg>
+            <span data-i18n="Check for updates">Check for updates</span>
+          </button>
+          <button id="settings" class="ghost nav-link" type="button">
+            <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9.7 3.8.4-1.3h3.8l.4 1.3 1.5.6 1.2-.7 2.7 2.7-.7 1.2.6 1.5 1.3.4v3.8l-1.3.4-.6 1.5.7 1.2-2.7 2.7-1.2-.7-1.5.6-.4 1.3h-3.8l-.4-1.3-1.5-.6-1.2.7-2.7-2.7.7-1.2-.6-1.5-1.3-.4V9.5l1.3-.4.6-1.5-.7-1.2 2.7-2.7 1.2.7 1.5-.6ZM12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/></svg>
+            <span data-i18n="Settings">Settings</span>
+          </button>
         </div>
       </header>
       <section id="ready" class="hero">
@@ -112,7 +123,8 @@
           <button id="settings-account-tab" class="secondary" type="button" role="tab" aria-controls="settings-account" aria-selected="false" data-settings-page="account" data-i18n="Service account">Service account</button>
         </nav>
         <div id="settings-general" class="settings-page" role="tabpanel" aria-labelledby="settings-general-tab">
-        <div class="field">
+        <div class="settings-form-grid">
+        <div class="field field-wide">
           <span id="language-label" data-i18n="Language">Language</span>
           <div class="lang" role="group" dir="ltr" aria-labelledby="language-label">
             <button id="lang-en" class="secondary" type="button" data-lang="en" aria-pressed="true">English</button>
@@ -127,7 +139,7 @@
           </div>
           <p class="detail" data-i18n="Nightly receives pre-release builds first.">Nightly receives pre-release builds first.</p>
         </div>
-        <div class="field">
+        <div class="field field-wide">
           <span id="font-label" data-i18n="Arabic font">Arabic font</span>
           <div class="fonts" role="group" dir="ltr" aria-labelledby="font-label">
             <button class="secondary" type="button" data-font="cairo" aria-pressed="true">Cairo</button>
@@ -142,15 +154,18 @@
         <label class="field"><span data-i18n="Sheet gid">Sheet gid</span>
           <input id="cfg-gid" type="text" inputmode="numeric" dir="ltr" />
         </label>
-        <label class="field"><span>zk4500.exe</span>
+        <label class="field field-wide"><span>zk4500.exe</span>
           <span class="file-row">
             <input id="cfg-exe" type="text" dir="ltr" />
             <button class="secondary browse" type="button" data-pick="exe" data-target="cfg-exe" data-i18n="Browse">Browse</button>
           </span>
         </label>
-        <p class="detail"><span data-i18n="Prints are stored in">Prints are stored in</span> <span id="cfg-dir" dir="ltr"></span></p>
-        <button id="sync-students" class="secondary" type="button" data-i18n="Sync student list">Sync student list</button>
-        <button id="clear-prints" class="danger" type="button" data-i18n="Delete all fingerprints">Delete all fingerprints</button>
+        <p class="detail field-wide"><span data-i18n="Prints are stored in">Prints are stored in</span> <span id="cfg-dir" dir="ltr"></span></p>
+        <div class="settings-inline-actions field-wide">
+          <button id="sync-students" class="secondary" type="button" data-i18n="Sync student list">Sync student list</button>
+          <button id="clear-prints" class="danger" type="button" data-i18n="Delete all fingerprints">Delete all fingerprints</button>
+        </div>
+        </div>
         </div>
         <div id="settings-account" class="settings-page" role="tabpanel" aria-labelledby="settings-account-tab" hidden>
           <div class="account-card">

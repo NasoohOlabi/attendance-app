@@ -1,6 +1,6 @@
 {
   "name": "attendance-app",
-  "version": "0.1.11",
+  "version": "0.1.16",
   "private": true,
   "description": "Masjid attendance fingerprint app",
   "author": "Masjid",
@@ -33,12 +33,12 @@
     "google-auth-library": "^10.3.0"
   },
   "devDependencies": {
-    "@electron/asar": "3.4.1",
+    "@electron/asar": "4.3.1",
     "@playwright/test": "1.64.0",
-    "electron": "44.7.0",
-    "electron-builder": "26.15.3",
+    "electron": "44.9.1",
+    "electron-builder": "26.18.0",
     "electron-vite": "^4.0.1",
-    "vite": "6.4.4"
+    "vite": "6.4.5"
   },
   "overrides": {
     "http-cache-semantics": "4.3.0",
@@ -79,10 +79,13 @@
       "allowToChangeInstallationDirectory": false,
       "shortcutName": "Masjid Attendance",
       "uninstallDisplayName": "Masjid Attendance",
+      "deleteAppDataOnUninstall": false,
       "artifactName": "Masjid-Attendance-Setup.${ext}"
     },
     "publish": {
       "provider": "github",
+      "owner": "NasoohOlabi",
+      "repo": "attendance-app",
       "releaseType": "release"
     }
   }

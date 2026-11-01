@@ -5,8 +5,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, safeStorage } from "electron";
 import electronUpdater from "electron-updater";
 import { createCredentialStore, credentialFile } from "../credentials.mjs";
-import { legacyUserDataPath, loadConfig, scannerExeInResources } from "../config.mjs";
+import { legacyUserDataPath, loadConfig, scannerExeInResources, updateChannelPreferencePath } from "../config.mjs";
 import { appLogFile, startAppLog } from "../log.mjs";
+import { updaterChannel, updaterErrorDetails, updaterInfoDetails } from "../update.mjs";
 import {
   createGoogle,
   explainApiFailure,
@@ -23,6 +24,7 @@ import {
   writeSheetValues,
 } from "../google.mjs";
 import { appendScanTrace, beginScanAttempt, mergeCapturedFiles, planScanRetry, runIdentify, SCAN_OUTAGE_MESSAGE, SCAN_RETRY_PAUSE_MS } from "../scan.mjs";
+import { attendanceTrend } from "../trend.mjs";
 import {
   captureScreen,
   findDateColumn,
@@ -102,6 +104,7 @@ let sheetReported = false;
 let attendanceRows = [];
 let scannerReady = true;
 let scanFailStreak = 0;
+let updateProgressLog = -1;
 
 const updateState = {
   enabled: app.isPackaged,
@@ -135,21 +138,55 @@ function publishUpdate(patch) {
   publish({ update: { ...updateState } });
 }
 
+function configureAutoUpdater() {
+  const configuredChannel = currentConfig?.updateChannel;
+  const logicalChannel = updaterChannel({ configuredChannel, currentVersion: app.getVersion() });
+  // electron-builder publishes the feed as latest.yml for both release types.
+  // Keep prerelease selection separate from the feed filename so custom
+  // channels do not make electron-updater request stable.yml/nightly.yml.
+  autoUpdater.channel = undefined;
+  autoUpdater.allowPrerelease = logicalChannel === "nightly";
+  console.info("updater configured", {
+    currentVersion: app.getVersion(),
+    configuredChannel,
+    channel: logicalChannel,
+    feedFile: "latest.yml",
+    allowPrerelease: autoUpdater.allowPrerelease,
+  });
+}
+
 function setupAutoUpdater() {
   if (!app.isPackaged) return;
-  autoUpdater.channel = currentConfig?.updateChannel || "stable";
-  autoUpdater.allowPrerelease = autoUpdater.channel === "nightly";
+  configureAutoUpdater();
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
-  autoUpdater.on("checking-for-update", () => publishUpdate({ status: "checking", error: "" }));
+  autoUpdater.on("checking-for-update", () => {
+    console.info("updater checking", { allowPrerelease: autoUpdater.allowPrerelease, feedFile: "latest.yml" });
+    publishUpdate({ status: "checking", error: "" });
+  });
   autoUpdater.on("update-available", (info) => {
+    updateProgressLog = -1;
+    console.info("updater update available", updaterInfoDetails(info));
     publishUpdate({ status: "available", version: info.version, progress: 0, error: "" });
   });
-  autoUpdater.on("update-not-available", () => publishUpdate({ status: "up-to-date", progress: 0, error: "" }));
-  autoUpdater.on("download-progress", (progress) => publishUpdate({ status: "downloading", progress: Math.round(progress.percent || 0), error: "" }));
-  autoUpdater.on("update-downloaded", (info) => publishUpdate({ status: "downloaded", version: info.version, progress: 100, error: "" }));
+  autoUpdater.on("update-not-available", (info) => {
+    console.info("updater up to date", updaterInfoDetails(info));
+    publishUpdate({ status: "up-to-date", progress: 0, error: "" });
+  });
+  autoUpdater.on("download-progress", (progress) => {
+    const percent = Math.round(progress.percent || 0);
+    if (percent === 0 || percent >= 100 || percent >= updateProgressLog + 25) {
+      updateProgressLog = percent;
+      console.info("updater download progress", { percent });
+    }
+    publishUpdate({ status: "downloading", progress: percent, error: "" });
+  });
+  autoUpdater.on("update-downloaded", (info) => {
+    console.info("updater update downloaded", updaterInfoDetails(info));
+    publishUpdate({ status: "downloaded", version: info.version, progress: 100, error: "" });
+  });
   autoUpdater.on("error", (error) => {
-    console.error("update failed", error);
+    console.error("updater event failed", updaterErrorDetails(error));
     publishUpdate({ status: "error", error: UPDATE_CHECK_ERROR });
   });
 }
@@ -157,11 +194,13 @@ function setupAutoUpdater() {
 async function checkForUpdates() {
   if (!app.isPackaged) return { ok: false, error: "Updates are available in installed builds." };
   try {
+    console.info("updater check requested", { currentVersion: app.getVersion(), channel: autoUpdater.channel });
     publishUpdate({ status: "checking", error: "" });
     await autoUpdater.checkForUpdates();
+    console.info("updater check completed", { status: updateState.status, version: updateState.version || "" });
     return { ok: true };
   } catch (error) {
-    console.error("update check failed", error);
+    console.error("updater check failed", updaterErrorDetails(error));
     publishUpdate({ status: "error", error: UPDATE_CHECK_ERROR });
     return { ok: false, error: UPDATE_CHECK_ERROR };
   }
@@ -176,31 +215,19 @@ async function updateAction() {
   }
   if (updateState.status === "available") {
     try {
+      updateProgressLog = -1;
       publishUpdate({ status: "downloading", progress: 0, error: "" });
+      console.info("updater download requested", { version: updateState.version || "", feedFile: "latest.yml" });
       await autoUpdater.downloadUpdate();
+      console.info("updater download completed", { status: updateState.status, version: updateState.version || "" });
       return { ok: true };
     } catch (error) {
-      console.error("update download failed", error);
+      console.error("updater download failed", updaterErrorDetails(error));
       publishUpdate({ status: "error", error: UPDATE_DOWNLOAD_ERROR });
       return { ok: false, error: UPDATE_DOWNLOAD_ERROR };
     }
   }
   return checkForUpdates();
-}
-
-function attendanceTrend(rows) {
-  const grid = parseAttendanceGrid(rows);
-  const columns = grid.header
-    .map((value, index) => ({ label: String(value || "").trim(), index }))
-    .filter(({ label }) => /^(?:(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+)?\d{1,2}\/\d{1,2}$/.test(label));
-  return columns.slice(-14).map(({ label, index }) => ({
-    label,
-    count: grid.students.reduce((total, student) => {
-      const value = rows[student.rowNumber - 1]?.[index];
-      const text = String(value ?? "").trim().toLowerCase();
-      return total + (value === true || text === "true" || text === "حاضر" || text === "Ø­Ø§Ø¶Ø±" ? 1 : 0);
-    }, 0),
-  }));
 }
 
 function configOptions() {
@@ -290,7 +317,27 @@ async function writeConfigFile(config, patch) {
   delete next.driveFolderId;
   delete next.driveSync;
   await mkdir(path.dirname(config.configPath), { recursive: true });
-  await writeFile(config.configPath, `${JSON.stringify(next, null, 2)}\n`);
+  const temp = `${config.configPath}.${process.pid}.tmp`;
+  await writeFile(temp, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  await rename(temp, config.configPath);
+}
+
+async function applyUpdateChannelPreference(config) {
+  try {
+    const saved = JSON.parse(await readFile(updateChannelPreferencePath(app.getPath("appData")), "utf8"));
+    if (saved.channel === "nightly" || saved.channel === "stable") config.updateChannel = saved.channel;
+  } catch (error) {
+    if (error.code !== "ENOENT") console.error("update channel preference failed", error.message);
+  }
+  return config;
+}
+
+async function saveUpdateChannelPreference(channel) {
+  const file = updateChannelPreferencePath(app.getPath("appData"));
+  await mkdir(path.dirname(file), { recursive: true });
+  const temp = `${file}.${process.pid}.tmp`;
+  await writeFile(temp, `${JSON.stringify({ channel })}\n`, "utf8");
+  await rename(temp, file);
 }
 
 function cacheStudents(students) {
@@ -1167,7 +1214,7 @@ async function startLoop() {
 
   let config;
   try {
-    config = loadConfig(configOptions());
+    config = await applyUpdateChannelPreference(loadConfig(configOptions()));
   } catch (err) {
     publish({
       phase: "ready",
@@ -1648,11 +1695,11 @@ function registerIpc() {
         syncIntervalSeconds: prev.syncIntervalSeconds,
         updateChannel: input?.updateChannel === "nightly" ? "nightly" : "stable",
       });
+      await saveUpdateChannelPreference(input?.updateChannel === "nightly" ? "nightly" : "stable");
       pause = false;
       await startLoop();
       if (app.isPackaged) {
-        autoUpdater.channel = currentConfig?.updateChannel || "stable";
-        autoUpdater.allowPrerelease = autoUpdater.channel === "nightly";
+        configureAutoUpdater();
       }
       return { ok: true };
     } catch (err) {

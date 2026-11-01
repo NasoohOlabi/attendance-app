@@ -125,13 +125,16 @@ test("fingerprint deletion confirmation can be canceled three ways without a she
 });
 
 test("ready window keeps its default size and honors its minimum size", async ({ app }) => {
-  const geometry = await app.electron.evaluate(({ BrowserWindow }) => {
+  const geometry = await app.electron.evaluate(({ BrowserWindow, screen }) => {
     const window = BrowserWindow.getAllWindows()[0];
-    return { bounds: window.getBounds(), minimum: window.getMinimumSize() };
+    return { bounds: window.getBounds(), minimum: window.getMinimumSize(), workArea: screen.getPrimaryDisplay().workAreaSize };
   });
-  expect(geometry.bounds.width).toBe(1120);
-  expect(geometry.bounds.height).toBeGreaterThanOrEqual(800);
-  expect(geometry.bounds.height).toBeLessThanOrEqual(804);
+  const expectedWidth = Math.min(1120, geometry.workArea.width);
+  const expectedHeight = Math.min(800, geometry.workArea.height);
+  expect(geometry.bounds.width).toBeGreaterThanOrEqual(expectedWidth);
+  expect(geometry.bounds.width).toBeLessThanOrEqual(expectedWidth + 4);
+  expect(geometry.bounds.height).toBeGreaterThanOrEqual(expectedHeight);
+  expect(geometry.bounds.height).toBeLessThanOrEqual(expectedHeight + 4);
   expect(geometry.minimum).toEqual([900, 680]);
 });
 
