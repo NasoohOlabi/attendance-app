@@ -115,6 +115,7 @@ const updateState = {
 };
 
 let state = {
+  appVersion: app.getVersion(),
   phase: "ready",
   headline: "Place a finger",
   detail: "Listening",
@@ -1801,6 +1802,7 @@ if (!app.requestSingleInstanceLock()) {
       Menu.setApplicationMenu(null);
       registerIpc();
       updateState.version = app.getVersion();
+      state.appVersion = app.getVersion();
       setupAutoUpdater();
       await loadScanTimes();
       await createWindow();
