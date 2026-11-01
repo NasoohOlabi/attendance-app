@@ -327,7 +327,7 @@ async function failureNote(config, err) {
 async function writeConfigFile(config, patch) {
   let file = {};
   try {
-    file = JSON.parse(await readFile(config.configPath, "utf8"));
+    file = JSON.parse((await readFile(config.configPath, "utf8")).replace(/^\uFEFF/, ""));
   } catch (err) {
     if (err.code !== "ENOENT") throw err;
   }
