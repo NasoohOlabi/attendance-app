@@ -20,7 +20,13 @@ for (const file of files) {
   if ((await stat(file)).size === 0) throw new Error(`Release artifact is empty: ${file}`);
 }
 
-const result = spawnSync(process.execPath, [builder, ...args], { cwd: root, stdio: "inherit" });
+const publishEnv = { ...process.env };
+if (/-[0-9A-Za-z.-]+$/.test(packageJson.version)) publishEnv.EP_PRE_RELEASE = "true";
+const result = spawnSync(process.execPath, [builder, ...args], {
+  cwd: root,
+  stdio: "inherit",
+  env: publishEnv,
+});
 if (result.error) throw result.error;
 if ((result.status ?? 1) !== 0) process.exit(result.status ?? 1);
 
