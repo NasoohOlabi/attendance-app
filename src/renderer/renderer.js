@@ -30,6 +30,11 @@ const error = document.querySelector("#error");
 const sync = document.querySelector("#sync");
 const settings = document.querySelector("#settings");
 const update = document.querySelector("#update");
+const updateDialog = document.querySelector("#update-dialog");
+const updateDialogDetail = document.querySelector("#update-dialog-detail");
+const updateProgress = document.querySelector("#update-progress");
+const updateDialogAction = document.querySelector("#update-dialog-action");
+const updateDialogClose = document.querySelector("#update-dialog-close");
 const cancel = document.querySelector("#cancel");
 const confirm = document.querySelector("#confirm");
 const confirmTitle = document.querySelector("#confirm-title");
@@ -73,6 +78,18 @@ function renderUpdate(updateState) {
   update.querySelector("span").textContent = label;
   update.disabled = info.status === "checking" || info.status === "downloading";
   update.title = info.error || "";
+  const modal = ["checking", "available", "downloading", "downloaded", "error"].includes(info.status);
+  updateDialog.hidden = !modal;
+  if (modal) {
+    const progress = Math.max(0, Math.min(100, Number(info.progress) || 0));
+    updateProgress.value = progress;
+    updateProgress.hidden = !["downloading", "downloaded"].includes(info.status);
+    updateDialogDetail.textContent = info.status === "downloading"
+      ? `${translate("Downloading updateâ€¦")} ${progress}%${info.error ? ` — ${info.error}` : ""}`
+      : info.error || translate(labels[info.status] || labels.idle);
+    updateDialogAction.textContent = translate(info.status === "downloaded" ? "Restart to update" : info.status === "available" || info.status === "error" ? "Download update" : "Check for updates");
+    updateDialogAction.hidden = info.status === "checking" || info.status === "downloading";
+  }
 }
 
 function renderDashboard(days) {
@@ -652,6 +669,12 @@ update.addEventListener("click", async () => {
     update.disabled = false;
   }
 });
+updateDialogAction.addEventListener("click", async () => {
+  updateDialogAction.disabled = true;
+  await window.attendance.updateAction();
+  updateDialogAction.disabled = false;
+});
+updateDialogClose.addEventListener("click", () => { updateDialog.hidden = true; });
 cancel.addEventListener("click", () => window.attendance.closeSettings());
 document.querySelector("#clear-prints").addEventListener("click", async () => {
   const button = document.querySelector("#clear-prints");

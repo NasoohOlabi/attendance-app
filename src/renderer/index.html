@@ -189,6 +189,19 @@
         <span id="sync"></span>
       </footer>
     </div>
+    <div id="update-dialog" class="update-dialog" role="dialog" aria-modal="false" aria-labelledby="update-dialog-title" hidden>
+      <div class="update-dialog-card">
+        <div class="update-dialog-head">
+          <strong id="update-dialog-title" data-i18n="Software update">Software update</strong>
+          <button id="update-dialog-close" class="ghost" type="button" aria-label="Close">×</button>
+        </div>
+        <p id="update-dialog-detail" class="detail"></p>
+        <progress id="update-progress" max="100" value="0"></progress>
+        <div class="update-dialog-actions">
+          <button id="update-dialog-action" class="primary" type="button"></button>
+        </div>
+      </div>
+    </div>
     <div id="confirm" class="confirm" hidden>
       <div class="confirm-card" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-detail">
         <h2 id="confirm-title"></h2>
