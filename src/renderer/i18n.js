@@ -4,6 +4,7 @@ const FONTS = ["cairo", "tajawal", "plex", "naskh"];
 
 /** English source strings. Arabic is the only other language. Names are never keys. */
 const AR = {
+  Version: "\u0627\u0644\u0625\u0635\u062f\u0627\u0631",
   Attendance: "الحضور",
   Settings: "الإعدادات",
   "Place a finger": "ضع إصبعاً",

@@ -105,6 +105,8 @@ let attendanceRows = [];
 let scannerReady = true;
 let scanFailStreak = 0;
 let updateProgressLog = -1;
+let updateDownloadAttempts = 0;
+let updateRetryTimer = null;
 
 const updateState = {
   enabled: app.isPackaged,
@@ -115,6 +117,7 @@ const updateState = {
 };
 
 let state = {
+  appVersion: app.getVersion(),
   phase: "ready",
   headline: "Place a finger",
   detail: "Listening",
@@ -146,6 +149,7 @@ function configureAutoUpdater() {
   // channels do not make electron-updater request stable.yml/nightly.yml.
   autoUpdater.channel = undefined;
   autoUpdater.allowPrerelease = logicalChannel === "nightly";
+  autoUpdater.disableDifferentialDownload = true;
   console.info("updater configured", {
     currentVersion: app.getVersion(),
     configuredChannel,
@@ -206,6 +210,31 @@ async function checkForUpdates() {
   }
 }
 
+async function downloadUpdateWithRetry() {
+  try {
+    updateProgressLog = -1;
+    publishUpdate({ status: "downloading", progress: 0, error: "" });
+    console.info("updater download requested", { version: updateState.version || "", feedFile: "latest.yml", attempt: updateDownloadAttempts + 1 });
+    await autoUpdater.downloadUpdate();
+    console.info("updater download completed", { status: updateState.status, version: updateState.version || "" });
+    return { ok: true };
+  } catch (error) {
+    updateDownloadAttempts += 1;
+    console.error("updater download failed", { ...updaterErrorDetails(error), attempt: updateDownloadAttempts });
+    if (updateDownloadAttempts < 5) {
+      publishUpdate({ status: "downloading", error: "Download interrupted. Retrying…" });
+      clearTimeout(updateRetryTimer);
+      updateRetryTimer = setTimeout(() => {
+        updateRetryTimer = null;
+        void downloadUpdateWithRetry();
+      }, 10000);
+      return { ok: true, retrying: true };
+    }
+    publishUpdate({ status: "error", error: UPDATE_DOWNLOAD_ERROR });
+    return { ok: false, error: UPDATE_DOWNLOAD_ERROR };
+  }
+}
+
 async function updateAction() {
   if (!app.isPackaged) return { ok: false, error: "Updates are available in installed builds." };
   if (updateState.status === "downloaded") {
@@ -214,18 +243,8 @@ async function updateAction() {
     return { ok: true };
   }
   if (updateState.status === "available") {
-    try {
-      updateProgressLog = -1;
-      publishUpdate({ status: "downloading", progress: 0, error: "" });
-      console.info("updater download requested", { version: updateState.version || "", feedFile: "latest.yml" });
-      await autoUpdater.downloadUpdate();
-      console.info("updater download completed", { status: updateState.status, version: updateState.version || "" });
-      return { ok: true };
-    } catch (error) {
-      console.error("updater download failed", updaterErrorDetails(error));
-      publishUpdate({ status: "error", error: UPDATE_DOWNLOAD_ERROR });
-      return { ok: false, error: UPDATE_DOWNLOAD_ERROR };
-    }
+    updateDownloadAttempts = 0;
+    return downloadUpdateWithRetry();
   }
   return checkForUpdates();
 }
@@ -1801,6 +1820,7 @@ if (!app.requestSingleInstanceLock()) {
       Menu.setApplicationMenu(null);
       registerIpc();
       updateState.version = app.getVersion();
+      state.appVersion = app.getVersion();
       setupAutoUpdater();
       await loadScanTimes();
       await createWindow();

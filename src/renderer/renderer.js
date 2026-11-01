@@ -250,6 +250,7 @@ async function choose(key) {
 
 function fillConfig(state) {
   const cfg = state.config || {};
+  document.querySelector("#app-version").textContent = state.appVersion || state.update?.version || "—";
   document.querySelector("#cfg-sheet").value = cfg.spreadsheetId || "";
   document.querySelector("#cfg-gid").value = cfg.sheetGid ?? "";
   document.querySelector("#cfg-exe").value = cfg.zk4500Cli || "";
