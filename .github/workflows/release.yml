@@ -1,4 +1,4 @@
-name: Release Windows installer
+﻿name: Release Windows installer
 
 on:
   push:
@@ -43,20 +43,7 @@ jobs:
       - run: bun run lint
       - run: bun run lint:history
       - run: node node_modules/electron/install.js
-      - name: Require release signing credentials
-        shell: pwsh
-        env:
-          WINDOWS_CODE_SIGNING_CERTIFICATE: ${{ secrets.WINDOWS_CODE_SIGNING_CERTIFICATE }}
-          WINDOWS_CODE_SIGNING_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGNING_PASSWORD }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CODE_SIGNING_CERTIFICATE) -or [string]::IsNullOrWhiteSpace($env:WINDOWS_CODE_SIGNING_PASSWORD)) {
-            throw "The release environment must provide WINDOWS_CODE_SIGNING_CERTIFICATE and WINDOWS_CODE_SIGNING_PASSWORD."
-          }
-      - name: Build signed installer
-        env:
-          CSC_LINK: ${{ secrets.WINDOWS_CODE_SIGNING_CERTIFICATE }}
-          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGNING_PASSWORD }}
-        run: bun run dist:package
+      - name: Build installer\n        run: bun run dist:package
       - name: Verify release artifacts
         shell: pwsh
         run: |
@@ -69,3 +56,4 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bun run publish:verified
+

@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "attendance-app",
   "version": "0.1.23",
   "private": true,
@@ -12,7 +12,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "dist": "node scripts/scanner-release.mjs && bun run build && electron-builder --win nsis",
-    "dist:package": "node scripts/scanner-release.mjs && bun run build && electron-builder --win nsis --publish never --config.win.signExecutable=true && bun run verify:update",
+    "dist:package": "node scripts/scanner-release.mjs && bun run build && electron-builder --win nsis --publish never --config.win.signExecutable=false && bun run verify:update",
     "dist:publish": "bun run dist:package && bun run publish:verified",
     "publish:verified": "node scripts/publish-verified.mjs",
     "release": "node scripts/release.mjs",
@@ -90,3 +90,4 @@
     }
   }
 }
+
