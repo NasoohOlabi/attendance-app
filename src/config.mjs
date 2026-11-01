@@ -75,7 +75,7 @@ export function loadConfig(options = {}) {
   let file = {};
   if (existsSync(configPath)) {
     try {
-      file = JSON.parse(readFileSync(configPath, "utf8"));
+      file = JSON.parse(readFileSync(configPath, "utf8").replace(/^\uFEFF/, ""));
     } catch (error) {
       throw new Error(`The settings file is corrupted or incomplete. Open Settings and save again. (${error.message})`);
     }
