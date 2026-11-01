@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { legacyUserDataPath, LEGACY_USER_DATA_DIR, loadConfig, requireGoogleConfig } from "../src/config.mjs";
+import { legacyUserDataPath, LEGACY_USER_DATA_DIR, loadConfig, requireGoogleConfig, updateChannelPreferencePath } from "../src/config.mjs";
 import { appendAppLog, appLogFile, appLogLine } from "../src/log.mjs";
 import { updaterChannel, updaterErrorDetails, updaterInfoDetails } from "../src/update.mjs";
 import { attendanceTrend } from "../src/trend.mjs";
@@ -1118,6 +1118,7 @@ test("the installed profile stays in the captured directory", () => {
   const appData = path.join("C:\\Users\\someone\\AppData", "Roaming");
   assert.equal(LEGACY_USER_DATA_DIR, "attendance-service");
   assert.equal(legacyUserDataPath(appData), path.join(appData, "attendance-service"));
+  assert.equal(updateChannelPreferencePath(appData), path.join(appData, "Masjid Attendance", "update-channel.json"));
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(pkg.name, "attendance-app");
   assert.equal(pkg.build.appId, "com.masjid.attendance");
@@ -1125,6 +1126,7 @@ test("the installed profile stays in the captured directory", () => {
   assert.equal(pkg.build.win.executableName, "Masjid Attendance");
   assert.equal(pkg.build.nsis.shortcutName, "Masjid Attendance");
   assert.equal(pkg.build.nsis.uninstallDisplayName, "Masjid Attendance");
+  assert.equal(pkg.build.nsis.deleteAppDataOnUninstall, false);
   assert.equal(pkg.build.nsis.guid, "2febcda6-3658-5c7c-9dfa-528fe71d9a9a");
   assert.deepEqual(pkg.build.publish, { provider: "github", owner: "NasoohOlabi", repo: "attendance-app", releaseType: "release" });
   assert.match(pkg.scripts["dist:publish"], /publish:verified/);

@@ -5,6 +5,10 @@ import path from "node:path";
 /** Profile directory the installed app already uses. Not the display name or the npm package name. */
 export const LEGACY_USER_DATA_DIR = "attendance-service";
 
+export function updateChannelPreferencePath(appData) {
+  return path.join(appData, "Masjid Attendance", "update-channel.json");
+}
+
 export function legacyUserDataPath(appData) {
   return path.join(appData, LEGACY_USER_DATA_DIR);
 }

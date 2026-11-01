@@ -79,6 +79,7 @@
       "allowToChangeInstallationDirectory": false,
       "shortcutName": "Masjid Attendance",
       "uninstallDisplayName": "Masjid Attendance",
+      "deleteAppDataOnUninstall": false,
       "artifactName": "Masjid-Attendance-Setup.${ext}"
     },
     "publish": {
