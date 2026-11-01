@@ -4,9 +4,10 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { legacyUserDataPath, LEGACY_USER_DATA_DIR, loadConfig, requireGoogleConfig } from "../src/config.mjs";
+import { legacyUserDataPath, LEGACY_USER_DATA_DIR, loadConfig, requireGoogleConfig, updateChannelPreferencePath } from "../src/config.mjs";
 import { appendAppLog, appLogFile, appLogLine } from "../src/log.mjs";
 import { updaterChannel, updaterErrorDetails, updaterInfoDetails } from "../src/update.mjs";
+import { attendanceTrend } from "../src/trend.mjs";
 import { attendanceCellUpdate, createGoogle, explainApiFailure, isOfflineError } from "../src/google.mjs";
 import { translate } from "../src/renderer/i18n.js";
 import { fingerCue, presentTrace, screenForPhase } from "../src/renderer/view.js";
@@ -306,6 +307,20 @@ test("today's tally is the حاضر names in today's column", () => {
     "18:09",
   );
   assert.equal(withScanTimes(people, {}, { "اسم أول": "09:00" }).filter((item) => item.name === "اسم أول").every((item) => item.time === ""), true);
+});
+
+test("attendance trend excludes future sheet dates", () => {
+  const rows = [
+    ["إسم كامل", "معرف", "Sat 10/10", "Sat 17/10", "Sat 24/10", "Sat 31/10", "Sat 7/11", "Sat 14/11"],
+    ["", "", "1", "0", "1", "0", "0", "0"],
+    ["اسم أول", "00 00 000 001", "حاضر", "", "حاضر", "", "", ""],
+  ];
+  assert.deepEqual(attendanceTrend(rows, new Date(2026, 10, 1)), [
+    { label: "Sat 10/10", count: 1 },
+    { label: "Sat 17/10", count: 0 },
+    { label: "Sat 24/10", count: 1 },
+    { label: "Sat 31/10", count: 0 },
+  ]);
 });
 
 test("date headers resolve to a column, including a bare day/month", () => {
@@ -1103,6 +1118,7 @@ test("the installed profile stays in the captured directory", () => {
   const appData = path.join("C:\\Users\\someone\\AppData", "Roaming");
   assert.equal(LEGACY_USER_DATA_DIR, "attendance-service");
   assert.equal(legacyUserDataPath(appData), path.join(appData, "attendance-service"));
+  assert.equal(updateChannelPreferencePath(appData), path.join(appData, "Masjid Attendance", "update-channel.json"));
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(pkg.name, "attendance-app");
   assert.equal(pkg.build.appId, "com.masjid.attendance");
@@ -1110,6 +1126,7 @@ test("the installed profile stays in the captured directory", () => {
   assert.equal(pkg.build.win.executableName, "Masjid Attendance");
   assert.equal(pkg.build.nsis.shortcutName, "Masjid Attendance");
   assert.equal(pkg.build.nsis.uninstallDisplayName, "Masjid Attendance");
+  assert.equal(pkg.build.nsis.deleteAppDataOnUninstall, false);
   assert.equal(pkg.build.nsis.guid, "2febcda6-3658-5c7c-9dfa-528fe71d9a9a");
   assert.deepEqual(pkg.build.publish, { provider: "github", owner: "NasoohOlabi", repo: "attendance-app", releaseType: "release" });
   assert.match(pkg.scripts["dist:publish"], /publish:verified/);

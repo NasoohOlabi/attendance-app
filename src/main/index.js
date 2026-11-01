@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, safeStorage } from "electron";
 import electronUpdater from "electron-updater";
 import { createCredentialStore, credentialFile } from "../credentials.mjs";
-import { legacyUserDataPath, loadConfig, scannerExeInResources } from "../config.mjs";
+import { legacyUserDataPath, loadConfig, scannerExeInResources, updateChannelPreferencePath } from "../config.mjs";
 import { appLogFile, startAppLog } from "../log.mjs";
 import { updaterChannel, updaterErrorDetails, updaterInfoDetails } from "../update.mjs";
 import {
@@ -24,6 +24,7 @@ import {
   writeSheetValues,
 } from "../google.mjs";
 import { appendScanTrace, beginScanAttempt, mergeCapturedFiles, planScanRetry, runIdentify, SCAN_OUTAGE_MESSAGE, SCAN_RETRY_PAUSE_MS } from "../scan.mjs";
+import { attendanceTrend } from "../trend.mjs";
 import {
   captureScreen,
   findDateColumn,
@@ -229,25 +230,6 @@ async function updateAction() {
   return checkForUpdates();
 }
 
-function attendanceTrend(rows) {
-  const grid = parseAttendanceGrid(rows);
-  const columns = grid.header
-    .map((value, index) => ({ label: String(value || "").trim(), index }))
-    .filter(({ label }) => /^(?:(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+)?\d{1,2}\/\d{1,2}$/.test(label));
-  return columns.slice(-14).map(({ label, index }) => ({
-    label,
-    count: grid.students.reduce((total, student) => {
-      const value = rows[student.rowNumber - 1]?.[index];
-      const text = String(value ?? "").trim().toLowerCase();
-      // Sheets can return checkbox values as booleans, TRUE/1, or the
-      // custom checked value depending on the value render mode and API path.
-      const present = value === true || text === "true" || text === "1"
-        || text === "yes" || text === "حاضر" || text === "Ø­Ø§Ø¶Ø±";
-      return total + (present ? 1 : 0);
-    }, 0),
-  }));
-}
-
 function configOptions() {
   if (!app.isPackaged) return {};
   const bundled = scannerExeInResources(process.resourcesPath);
@@ -356,6 +338,22 @@ async function saveUpdateChannelPreference(channel) {
   const temp = `${file}.${process.pid}.tmp`;
   await writeFile(temp, `${JSON.stringify({ channel })}\n`, "utf8");
   await rename(temp, file);
+}
+
+async function applyUpdateChannelPreference(config) {
+  try {
+    const saved = JSON.parse(await readFile(updateChannelPreferencePath(app.getPath("appData")), "utf8"));
+    if (saved.channel === "nightly" || saved.channel === "stable") config.updateChannel = saved.channel;
+  } catch (error) {
+    if (error.code !== "ENOENT") console.error("update channel preference failed", error.message);
+  }
+  return config;
+}
+
+async function saveUpdateChannelPreference(channel) {
+  const file = updateChannelPreferencePath(app.getPath("appData"));
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, `${JSON.stringify({ channel })}\n`);
 }
 
 function cacheStudents(students) {
@@ -1232,7 +1230,7 @@ async function startLoop() {
 
   let config;
   try {
-    config = loadConfig(configOptions());
+    config = await applyUpdateChannelPreference(loadConfig(configOptions()));
   } catch (err) {
     publish({
       phase: "ready",
@@ -1713,6 +1711,7 @@ function registerIpc() {
         syncIntervalSeconds: prev.syncIntervalSeconds,
         updateChannel: input?.updateChannel === "nightly" ? "nightly" : "stable",
       });
+      await saveUpdateChannelPreference(input?.updateChannel === "nightly" ? "nightly" : "stable");
       pause = false;
       await startLoop();
       if (app.isPackaged) {
