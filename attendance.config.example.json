@@ -1,6 +1,7 @@
 {
   "_note": "Copy to attendance.config.json. Import a key in Settings > Service account to store it encrypted beside fingerprints. serviceAccountJson is only for a legacy external key-file path, never the key itself. Leave a field empty when you do not have a value yet.",
   "serviceAccountJson": "",
+  "attendanceDestination": "sheet",
   "spreadsheetId": "",
   "sheetGid": null,
   "logSpreadsheetId": "",

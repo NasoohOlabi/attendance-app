@@ -251,8 +251,10 @@ function renderList(students) {
 
 async function refreshList() {
   const gen = ++filterGen;
-  const students = await window.attendance.filter(search.value);
+  const result = await window.attendance.filter(search.value);
   if (gen !== filterGen) return;
+  const students = Array.isArray(result) ? result : result?.students || [];
+  empty.textContent = translate(Array.isArray(result) ? "No matching students" : result?.error || "No matching students");
   renderList(students);
 }
 
@@ -268,11 +270,22 @@ async function choose(key) {
 function fillConfig(state) {
   const cfg = state.config || {};
   document.querySelector("#app-version").textContent = state.appVersion || state.update?.version || "â€”";
+  document.querySelector("#cfg-destination").value = cfg.attendanceDestination || "sheet";
+  showDestinationFields();
   document.querySelector("#cfg-sheet").value = cfg.spreadsheetId || "";
   document.querySelector("#cfg-gid").value = cfg.sheetGid ?? "";
+  document.querySelector("#cfg-log-sheet").value = cfg.logSpreadsheetId || "";
+  document.querySelector("#cfg-log-gid").value = cfg.logSheetGid ?? "";
+  document.querySelector("#cfg-print-gid").value = cfg.fingerprintSheetGid ?? "";
   document.querySelector("#cfg-exe").value = cfg.zk4500Cli || "";
   document.querySelector("#cfg-dir").textContent = state.fingerprintDir || cfg.fingerprintDir || "";
   for (const button of document.querySelectorAll("[data-track]")) button.setAttribute("aria-pressed", String(button.dataset.track === (cfg.updateChannel || "stable")));
+  const bouty = state.bouty || {};
+  document.querySelector("#bouty-settings").value = JSON.stringify({
+    mapping: bouty.mapping || [], days: bouty.days || {}, presentStatusId: bouty.presentStatusId || 1, absentStatusId: bouty.absentStatusId || 2,
+  }, null, 2);
+  document.querySelector("#bouty-user").value = "";
+  document.querySelector("#bouty-password").value = "";
   cancel.hidden = !state.canCloseSettings;
   chooseSettingsPage("general");
 }
@@ -287,9 +300,18 @@ syncStudents.addEventListener("click", async () => {
   }
 });
 
+function showDestinationFields() {
+  const hidden = document.querySelector("#cfg-destination").value === "bouty";
+  document.querySelector("#sheet-id-field").hidden = hidden;
+  document.querySelector("#sheet-gid-field").hidden = hidden;
+}
+
+document.querySelector("#cfg-destination").addEventListener("change", showDestinationFields);
+
 function chooseSettingsPage(page) {
   document.querySelector("#settings-general").hidden = page !== "general";
   document.querySelector("#settings-account").hidden = page !== "account";
+  document.querySelector("#settings-bouty").hidden = page !== "bouty";
   document.querySelector("#save").hidden = page !== "general";
   for (const tab of document.querySelectorAll("[data-settings-page]")) {
     tab.setAttribute("aria-selected", String(tab.dataset.settingsPage === page));
@@ -527,6 +549,7 @@ function render(state) {
   if (version) version.textContent = state.appVersion || state.update?.version || "â€”";
   renderUpdate(state.update);
   renderServiceAccount(state);
+  document.querySelector("#bouty-status").textContent = translate(state.bouty?.message || (state.bouty?.enabled ? "Bouty account saved." : "Bouty is not configured."));
   const mode = screenForPhase(state.phase);
   const enteredPicker = mode === "pending" && !picker;
   const enteredConfig = mode === "config" && !configOpen;
@@ -570,6 +593,10 @@ function render(state) {
         time.textContent = when;
         lastMeta.append(time);
       }
+      if (state.lastMatch.profileStatus) {
+        if (lastMeta.childNodes.length) lastMeta.append(document.createTextNode("  ·  "));
+        lastMeta.append(document.createTextNode(translate(state.lastMatch.profileStatus)));
+      }
       renderProfile(state.lastMatch.fields);
     } else {
       last.hidden = true;
@@ -598,7 +625,7 @@ function render(state) {
   }
   error.hidden = !state.error;
   error.textContent = translate(state.error || "");
-  sync.textContent = translate(state.syncNote || "");
+  sync.textContent = [state.syncNote, state.bouty?.message].filter(Boolean).map(translate).join(" · ");
 }
 
 dashboard.addEventListener("click", () => {
@@ -610,7 +637,18 @@ dashboardClose.addEventListener("click", () => {
   show("ready");
 });
 
-search.addEventListener("input", () => refreshList());
+let searchTimer;
+search.addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  filterGen += 1;
+  if (lastState?.config?.attendanceDestination === "bouty") {
+    list.replaceChildren();
+    empty.hidden = false;
+    empty.textContent = translate("Searching Bouty…");
+    searchTimer = setTimeout(() => refreshList(), 350);
+  }
+  else void refreshList();
+});
 search.addEventListener("keydown", (event) => {
   if (event.key !== "Enter") return;
   const first = list.querySelector("button");
@@ -707,8 +745,12 @@ document.querySelector("#save").addEventListener("click", async () => {
   const save = document.querySelector("#save");
   save.disabled = true;
   const result = await window.attendance.saveConfig({
+    attendanceDestination: document.querySelector("#cfg-destination").value,
     spreadsheetId: document.querySelector("#cfg-sheet").value,
     sheetGid: document.querySelector("#cfg-gid").value,
+    logSpreadsheetId: document.querySelector("#cfg-log-sheet").value,
+    logSheetGid: document.querySelector("#cfg-log-gid").value,
+    fingerprintSheetGid: document.querySelector("#cfg-print-gid").value,
     zk4500Cli: document.querySelector("#cfg-exe").value,
     updateChannel: document.querySelector('[data-track][aria-pressed="true"]')?.dataset.track || "stable",
   });
@@ -724,6 +766,16 @@ for (const button of document.querySelectorAll("[data-track]")) button.addEventL
 for (const tab of document.querySelectorAll("[data-settings-page]")) {
   tab.addEventListener("click", () => chooseSettingsPage(tab.dataset.settingsPage));
 }
+document.querySelector("#save-bouty").addEventListener("click", async () => {
+  const button = document.querySelector("#save-bouty");
+  button.disabled = true;
+  try {
+    const result = await window.attendance.saveBouty({ username: document.querySelector("#bouty-user").value,
+      password: document.querySelector("#bouty-password").value, settings: document.querySelector("#bouty-settings").value });
+    if (!result?.ok) { error.hidden = false; error.textContent = translate(result?.error || "Bouty settings could not be saved."); }
+    else { document.querySelector("#bouty-password").value = ""; error.hidden = true; }
+  } finally { button.disabled = false; }
+});
 document.querySelector("#import-account").addEventListener("click", async () => {
   importingAccount = true;
   renderServiceAccount(lastState || {});

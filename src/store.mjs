@@ -635,6 +635,13 @@ export function attachLogTimes(present, logRows, date) {
   });
 }
 
+/** In Bouty mode the Pages log, rather than the date grid, supplies today's list. */
+export function presentFromLog(students, logRows, date = new Date()) {
+  const people = (students || []).filter((student) => student.studentId && logHits(logRows, student.studentId, date).length)
+    .map((student) => ({ name: student.studentName || student.studentId, studentId: student.studentId, rowNumber: student.rowNumber }));
+  return attachLogTimes(people, logRows, date);
+}
+
 /** Keep today's Damascus date and replace the clock. */
 export function stampFromClock(date, clock, timeZone = "Asia/Damascus") {
   const parsed = parseClock(clock);
@@ -643,6 +650,12 @@ export function stampFromClock(date, clock, timeZone = "Asia/Damascus") {
   const hour = String(parsed.hour).padStart(2, "0");
   const minute = String(parsed.minute).padStart(2, "0");
   return `${day} ${hour}:${minute}:00`;
+}
+
+/** Preserve scan seconds unless the operator explicitly edited the clock. */
+export function queuedAttendanceStamp(item) {
+  const when = new Date(item.at);
+  return item.exactTime ? attendanceStamp(when) : (item.time ? stampFromClock(when, item.time) : "");
 }
 
 /** Damascus day for a queued mark, so a late sync still hits the day it was scanned. */
@@ -669,9 +682,20 @@ export function attendanceListed(people, person) {
   return (people || []).some((item) => sameAttendance(item, person));
 }
 
+function sameQueuedDestination(a, b) {
+  return (a?.destination || "sheet") === (b?.destination || "sheet");
+}
+
+/** Finish Pages writes after a switch without writing new daily-grid cells. */
+export function nextGoogleAttendance(items, destination) {
+  return (items || []).find((item) => destination !== "bouty" || item.destination === "bouty" || item.kind === "time" || item.cell);
+}
+
 function queuedPerson(person, kind) {
   return {
     kind,
+    ...(person.destination === "bouty" ? { destination: "bouty" } : {}),
+    ...(person.exactTime ? { exactTime: true } : {}),
     studentId: canonicalStudentId(person.studentId) || String(person.studentId || "").trim(),
     studentName: String(person.studentName || "").trim(),
     rowNumber: Number(person.rowNumber) || 0,
@@ -688,8 +712,8 @@ export function queuePresent(items, person, active = null) {
   const list = items || [];
   const day = outboxDay(person.at);
   if (!attendanceKey(person) || !day) return list;
-  const rest = list.filter((item) => item === active || !(item.kind === "absent" && sameAttendance(item, person) && outboxDay(item.at) === day));
-  if (rest.some((item) => item.kind === "present" && sameAttendance(item, person) && outboxDay(item.at) === day)) return rest;
+  const rest = list.filter((item) => item === active || !(item.kind === "absent" && sameAttendance(item, person) && sameQueuedDestination(item, person) && outboxDay(item.at) === day));
+  if (rest.some((item) => item.kind === "present" && sameAttendance(item, person) && sameQueuedDestination(item, person) && outboxDay(item.at) === day)) return rest;
   return [...rest, queuedPerson(person, "present")];
 }
 
@@ -698,16 +722,16 @@ export function queueAbsent(items, person, active = null) {
   const list = items || [];
   const day = outboxDay(person.at);
   if (!attendanceKey(person) || !day) return list;
-  const open = list.find((item) => item.kind === "present" && sameAttendance(item, person) && outboxDay(item.at) === day);
+  const open = list.find((item) => item.kind === "present" && sameAttendance(item, person) && sameQueuedDestination(item, person) && outboxDay(item.at) === day);
   if (open && open !== active && !open.cell && !open.log) {
-    return list.filter((item) => item !== open && !(item.kind === "time" && sameAttendance(item, person) && outboxDay(item.at) === day));
+    return list.filter((item) => item !== open && !(item.kind === "time" && sameAttendance(item, person) && sameQueuedDestination(item, person) && outboxDay(item.at) === day));
   }
   const kept = list.filter((item) => {
     if (item === active) return true;
-    if (sameAttendance(item, person) && outboxDay(item.at) === day && (item.kind === "time" || item === open)) return false;
+    if (sameAttendance(item, person) && sameQueuedDestination(item, person) && outboxDay(item.at) === day && (item.kind === "time" || item === open)) return false;
     return true;
   });
-  if (kept.some((item) => item.kind === "absent" && sameAttendance(item, person) && outboxDay(item.at) === day)) return kept;
+  if (kept.some((item) => item.kind === "absent" && sameAttendance(item, person) && sameQueuedDestination(item, person) && outboxDay(item.at) === day)) return kept;
   const absent = queuedPerson({ ...person, studentName: person.studentName || open?.studentName || "" }, "absent");
   return [...kept, absent];
 }
@@ -717,9 +741,9 @@ export function queueClock(items, person, active = null) {
   const list = items || [];
   const day = outboxDay(person.at);
   if (!attendanceKey(person) || !day) return list;
-  const open = list.find((item) => item.kind === "present" && sameAttendance(item, person) && outboxDay(item.at) === day && !item.log);
-  if (open && open !== active) return list.map((item) => (item === open ? { ...item, time: String(person.time || "").trim() } : item));
-  const rest = list.filter((item) => item === active || !(item.kind === "time" && sameAttendance(item, person) && outboxDay(item.at) === day));
+  const open = list.find((item) => item.kind === "present" && sameAttendance(item, person) && sameQueuedDestination(item, person) && outboxDay(item.at) === day && !item.log);
+  if (open && open !== active) return list.map((item) => (item === open ? { ...item, exactTime: false, time: String(person.time || "").trim() } : item));
+  const rest = list.filter((item) => item === active || !(item.kind === "time" && sameAttendance(item, person) && sameQueuedDestination(item, person) && outboxDay(item.at) === day));
   return [...rest, queuedPerson(person, "time")];
 }
 

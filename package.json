@@ -30,7 +30,8 @@
   },
   "dependencies": {
     "electron-updater": "^6.6.2",
-    "google-auth-library": "^10.3.0"
+    "google-auth-library": "^10.3.0",
+    "parse5": "7.3.0"
   },
   "devDependencies": {
     "@electron/asar": "4.3.1",
