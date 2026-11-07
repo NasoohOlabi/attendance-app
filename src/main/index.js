@@ -2103,7 +2103,9 @@ function registerIpc() {
     publish({
       phase: "config",
       headline: "Setup",
-      detail: "Google account, spreadsheet, gid, and scanner.",
+      detail: currentConfig?.attendanceDestination === "bouty"
+        ? "Bouty account, Pages sheet, and scanner."
+        : "Google account, spreadsheet, gid, and scanner.",
       error: "",
       canCloseSettings: true,
     });

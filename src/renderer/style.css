@@ -875,6 +875,7 @@ input[type="text"], input[type="search"], input[type="password"], select, textar
   border-color: var(--green);
 }
 .field { display: block; min-width: 0; }
+#bouty-fields { display: flex; flex-direction: column; gap: 14px; }
 .settings-tabs {
   display: flex;
   gap: 4px;
