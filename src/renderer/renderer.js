@@ -323,14 +323,21 @@ function selectedDestination() {
   return document.querySelector("[data-destination][aria-pressed='true']")?.dataset.destination || "sheet";
 }
 
-function showDestinationFields() {
+const SETTINGS_DETAIL = new Set([
+  "Google account, spreadsheet, gid, and scanner.",
+  "Bouty account, Pages sheet, and scanner.",
+]);
+
+function showDestinationFields(status) {
   const bouty = selectedDestination() === "bouty";
   document.querySelector("#sheet-id-field").hidden = bouty;
   document.querySelector("#sheet-gid-field").hidden = bouty;
   document.querySelector("#bouty-fields").hidden = !bouty;
-  document.querySelector("#config-detail").textContent = translate(bouty
+  const sentence = bouty
     ? "Bouty account, Pages sheet, and scanner."
-    : "Google account, spreadsheet, gid, and scanner.");
+    : "Google account, spreadsheet, gid, and scanner.";
+  const text = status && !SETTINGS_DETAIL.has(status) ? status : sentence;
+  document.querySelector("#config-detail").textContent = translate(text);
 }
 
 for (const button of document.querySelectorAll("[data-destination]")) {
@@ -657,7 +664,7 @@ function render(state) {
   if (mode === "config") {
     cancel.hidden = !state.canCloseSettings;
     if (enteredConfig) fillConfig(state);
-    else showDestinationFields();
+    showDestinationFields(state.detail);
   }
   if (mode === "prints") {
     document.querySelector("#prints-detail").textContent = translate(state.detail || "Remove one student's prints from this computer and the fingerprints sheet.");
