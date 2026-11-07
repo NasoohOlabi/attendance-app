@@ -31,6 +31,8 @@ const AR = {
     "مسار حساب الخدمة، والجدول، والمعرّف، والماسح.",
   "Service account JSON": "ملف حساب الخدمة",
   "Google account, spreadsheet, gid, and scanner.": "حساب Google والجدول ومعرّف الورقة والماسح.",
+  "Bouty account, Pages sheet, and scanner.": "حساب البوطي وجدول الصفحات والماسح.",
+  "Google sheet": "كشف غوغل",
   General: "عام",
   "Attendance destination": "وجهة تسجيل الحضور",
   "Daily sheet changes are waiting.": "تغييرات جدول الحضور اليومي بانتظار المزامنة.",

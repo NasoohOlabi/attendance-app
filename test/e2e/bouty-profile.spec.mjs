@@ -36,7 +36,7 @@ async function mockBouty(electron) {
 test("Bouty picker and scan card use website student information", async ({ app }) => {
   await mockBouty(app.electron);
   await app.page.locator("#settings").click();
-  await app.page.locator("#settings-bouty-tab").click();
+  await app.page.locator("#destination-bouty").click();
   await app.page.locator("#bouty-user").fill("synthetic-user");
   await app.page.locator("#bouty-password").fill("synthetic-password");
   await app.page.locator("#save-bouty").click();

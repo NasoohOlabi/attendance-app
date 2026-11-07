@@ -286,7 +286,10 @@ async function choose(key) {
 function fillConfig(state) {
   const cfg = state.config || {};
   document.querySelector("#app-version").textContent = state.appVersion || state.update?.version || "—";
-  document.querySelector("#cfg-destination").value = cfg.attendanceDestination || "sheet";
+  const destination = cfg.attendanceDestination === "bouty" ? "bouty" : "sheet";
+  for (const button of document.querySelectorAll("[data-destination]")) {
+    button.setAttribute("aria-pressed", String(button.dataset.destination === destination));
+  }
   showDestinationFields();
   document.querySelector("#cfg-sheet").value = cfg.spreadsheetId || "";
   document.querySelector("#cfg-gid").value = cfg.sheetGid ?? "";
@@ -316,18 +319,32 @@ syncStudents.addEventListener("click", async () => {
   }
 });
 
-function showDestinationFields() {
-  const hidden = document.querySelector("#cfg-destination").value === "bouty";
-  document.querySelector("#sheet-id-field").hidden = hidden;
-  document.querySelector("#sheet-gid-field").hidden = hidden;
+function selectedDestination() {
+  return document.querySelector("[data-destination][aria-pressed='true']")?.dataset.destination || "sheet";
 }
 
-document.querySelector("#cfg-destination").addEventListener("change", showDestinationFields);
+function showDestinationFields() {
+  const bouty = selectedDestination() === "bouty";
+  document.querySelector("#sheet-id-field").hidden = bouty;
+  document.querySelector("#sheet-gid-field").hidden = bouty;
+  document.querySelector("#bouty-fields").hidden = !bouty;
+  document.querySelector("#config-detail").textContent = translate(bouty
+    ? "Bouty account, Pages sheet, and scanner."
+    : "Google account, spreadsheet, gid, and scanner.");
+}
+
+for (const button of document.querySelectorAll("[data-destination]")) {
+  button.addEventListener("click", () => {
+    for (const candidate of document.querySelectorAll("[data-destination]")) {
+      candidate.setAttribute("aria-pressed", String(candidate === button));
+    }
+    showDestinationFields();
+  });
+}
 
 function chooseSettingsPage(page) {
   document.querySelector("#settings-general").hidden = page !== "general";
   document.querySelector("#settings-account").hidden = page !== "account";
-  document.querySelector("#settings-bouty").hidden = page !== "bouty";
   document.querySelector("#save").hidden = page !== "general";
   for (const tab of document.querySelectorAll("[data-settings-page]")) {
     tab.setAttribute("aria-selected", String(tab.dataset.settingsPage === page));
@@ -638,9 +655,9 @@ function render(state) {
     paintPendingGallery([], "", false);
   }
   if (mode === "config") {
-    document.querySelector("#config-detail").textContent = translate(state.detail || "");
     cancel.hidden = !state.canCloseSettings;
     if (enteredConfig) fillConfig(state);
+    else showDestinationFields();
   }
   if (mode === "prints") {
     document.querySelector("#prints-detail").textContent = translate(state.detail || "Remove one student's prints from this computer and the fingerprints sheet.");
@@ -870,7 +887,7 @@ document.querySelector("#save").addEventListener("click", async () => {
   const save = document.querySelector("#save");
   save.disabled = true;
   const result = await window.attendance.saveConfig({
-    attendanceDestination: document.querySelector("#cfg-destination").value,
+    attendanceDestination: selectedDestination(),
     spreadsheetId: document.querySelector("#cfg-sheet").value,
     sheetGid: document.querySelector("#cfg-gid").value,
     logSpreadsheetId: document.querySelector("#cfg-log-sheet").value,
