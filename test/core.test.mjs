@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { legacyUserDataPath, LEGACY_USER_DATA_DIR, loadConfig, requireGoogleConfig, updateChannelPreferencePath } from "../src/config.mjs";
 import { appendAppLog, appLogFile, appLogLine } from "../src/log.mjs";
-import { updaterChannel, updaterErrorDetails, updaterInfoDetails } from "../src/update.mjs";
+import { updaterChannel, updaterErrorDetails, updaterInfoDetails, updaterShouldOffer } from "../src/update.mjs";
 import { attendanceTrend } from "../src/trend.mjs";
 import { attendanceCellUpdate, createGoogle, explainApiFailure, isOfflineError } from "../src/google.mjs";
 import { translate } from "../src/renderer/i18n.js";
@@ -62,6 +62,13 @@ test("updater channel follows nightly config or version", () => {
   assert.equal(updaterChannel({ configuredChannel: "nightly", currentVersion: "0.1.13" }), "nightly");
   assert.equal(updaterChannel({ configuredChannel: "stable", currentVersion: "0.1.13-nightly.7" }), "nightly");
   assert.equal(updaterChannel({ configuredChannel: "stable", currentVersion: "0.1.13" }), "stable");
+});
+
+test("stable updates ignore an older nightly feed", () => {
+  assert.equal(updaterShouldOffer({ currentVersion: "0.1.21", nextVersion: "0.1.12-nightly.24", channel: "stable" }), false);
+  assert.equal(updaterShouldOffer({ currentVersion: "0.1.21", nextVersion: "0.1.21", channel: "stable" }), false);
+  assert.equal(updaterShouldOffer({ currentVersion: "0.1.21", nextVersion: "0.1.22", channel: "stable" }), true);
+  assert.equal(updaterShouldOffer({ currentVersion: "0.1.12-nightly.24", nextVersion: "0.1.21", channel: "nightly" }), true);
 });
 
 test("updater diagnostics redact error details to safe bounded fields", () => {

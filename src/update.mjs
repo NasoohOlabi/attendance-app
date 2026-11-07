@@ -1,7 +1,17 @@
+import semver from "semver";
+
 export function updaterChannel({ configuredChannel, currentVersion } = {}) {
   const configured = configuredChannel === "nightly" ? "nightly" : "stable";
   const version = String(currentVersion || "");
   return configured === "nightly" || /-nightly(?:\.|$)/i.test(version) ? "nightly" : "stable";
+}
+
+export function updaterShouldOffer({ currentVersion, nextVersion, channel } = {}) {
+  const current = semver.parse(String(currentVersion || ""));
+  const next = semver.parse(String(nextVersion || ""));
+  if (!current || !next || !semver.gt(next, current)) return false;
+  if (channel !== "nightly" && next.prerelease.length > 0) return false;
+  return true;
 }
 
 export function updaterErrorDetails(error) {

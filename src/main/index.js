@@ -11,7 +11,7 @@ import { applyBoutyProfile, boutyStudentChoices } from "../bouty-resolve.mjs";
 import { createCredentialStore, credentialFile } from "../credentials.mjs";
 import { legacyUserDataPath, loadConfig, scannerExeInResources, updateChannelPreferencePath } from "../config.mjs";
 import { appLogFile, startAppLog } from "../log.mjs";
-import { updaterChannel, updaterErrorDetails, updaterInfoDetails } from "../update.mjs";
+import { updaterChannel, updaterErrorDetails, updaterInfoDetails, updaterShouldOffer } from "../update.mjs";
 import {
   createGoogle,
   explainApiFailure,
@@ -241,11 +241,10 @@ function publishUpdate(patch) {
 function configureAutoUpdater() {
   const configuredChannel = currentConfig?.updateChannel;
   const logicalChannel = updaterChannel({ configuredChannel, currentVersion: app.getVersion() });
-  // electron-builder publishes the feed as latest.yml for both release types.
-  // Keep prerelease selection separate from the feed filename so custom
-  // channels do not make electron-updater request stable.yml/nightly.yml.
-  autoUpdater.channel = undefined;
+  // Leave the feed on latest.yml. Assigning channel makes electron-updater
+  // allow a downgrade and request stable.yml, which these releases do not publish.
   autoUpdater.allowPrerelease = logicalChannel === "nightly";
+  autoUpdater.allowDowngrade = false;
   autoUpdater.disableDifferentialDownload = true;
   console.info("updater configured", {
     currentVersion: app.getVersion(),
@@ -266,6 +265,12 @@ function setupAutoUpdater() {
     publishUpdate({ status: "checking", error: "" });
   });
   autoUpdater.on("update-available", (info) => {
+    const channel = updaterChannel({ configuredChannel: currentConfig?.updateChannel, currentVersion: app.getVersion() });
+    if (!updaterShouldOffer({ currentVersion: app.getVersion(), nextVersion: info.version, channel })) {
+      console.info("updater ignored older feed", updaterInfoDetails(info));
+      publishUpdate({ status: "up-to-date", version: "", progress: 0, error: "" });
+      return;
+    }
     updateProgressLog = -1;
     console.info("updater update available", updaterInfoDetails(info));
     publishUpdate({ status: "available", version: info.version, progress: 0, error: "" });
