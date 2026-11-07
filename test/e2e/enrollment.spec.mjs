@@ -42,6 +42,24 @@ test("assigning an unknown print by id marks the right same-name student and mat
   expect(app.sheets.grid("FingerPrints").rows).toHaveLength(2);
 });
 
+test("a second assignment adds a print and keeps the first", async ({ app }) => {
+  await app.ready();
+  await app.seedPrint(id1, "أحمد طالب");
+  await captureUnknown(app, "second-capture");
+  const choice = app.page.locator("#list li button").filter({ hasText: id1 });
+  await expect(choice).toContainText("1 print");
+  await expect(choice).not.toContainText("replace");
+  await choice.click();
+  await expect(app.page.locator("#ready")).toBeVisible();
+
+  expect(await readFile(path.join(app.prints, "templates", "s-00-00-000-001.txt"), "utf8")).toBe("synthetic-print");
+  expect(await readFile(path.join(app.prints, "templates", "s-00-00-000-001--2.txt"), "utf8")).toBe("second-capture");
+  expect((await app.index()).students[id1].templateFile).toBe("s-00-00-000-001.txt");
+  await expect.poll(() => app.sheets.grid("FingerPrints").rows).toHaveLength(2);
+  expect(app.sheets.grid("FingerPrints").rows[1].slice(0, 2)).toEqual([id1, "second-capture"]);
+  expect(app.sheets.grid("Info").rows[2][2]).toBe("حاضر");
+});
+
 test("Done saves three kept scans as separate files and sheet rows", async ({ app }) => {
   await app.ready();
   await captureUnknown(app, "primary");

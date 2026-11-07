@@ -32,6 +32,7 @@ import {
   stampFromClock,
   nextSampleFile,
   planBatchFiles,
+  studentTemplateNames,
   pendingPath,
   studentByTemplateSid,
   attendanceLogRow,
@@ -523,6 +524,21 @@ test("a batch of scans fills the primary file then extras", () => {
   assert.deepEqual(planBatchFiles("s-adam.txt", [], 0), []);
 });
 
+test("a second scan adds --2 and keeps the primary", () => {
+  const existing = ["s-00-00-000-001.txt", "s-00-00-000-002.txt", "notes.txt"];
+  const added = planBatchFiles("s-00-00-000-001.txt", existing, 1);
+  assert.deepEqual(added, ["s-00-00-000-001--2.txt"]);
+  assert.equal(added.includes("s-00-00-000-001.txt"), false);
+  assert.deepEqual(
+    studentTemplateNames({ studentId: "00 00 000 001" }, [...existing, ...added]).sort(),
+    ["s-00-00-000-001--2.txt", "s-00-00-000-001.txt"],
+  );
+  assert.deepEqual(studentTemplateNames({ studentId: "", studentName: "No Id" }, ["s-no-id.txt", "s-no-id--2.txt", "s-other.txt"]).sort(), [
+    "s-no-id--2.txt",
+    "s-no-id.txt",
+  ]);
+});
+
 test("decidePrint is known only when the matched template is linked", () => {
   const students = {
     "7": { studentId: "7", studentName: "Nasoum", templateFile: "s-7.txt" },
@@ -928,6 +944,10 @@ test("arabic copy keeps student names and turns known chrome into Arabic", () =>
   assert.match(timed, /مثال/);
   assert.match(timed, /16:55:03/);
   assert.match(translate("3 scans kept. Place another finger.", "ar"), /3/);
+  assert.equal(translate("1 print", "ar"), "بصمة واحدة");
+  assert.equal(translate("2 prints", "ar"), "بصمتان");
+  assert.equal(translate("4 prints", "ar"), "4 بصمات");
+  assert.equal(translate("add", "ar"), "إضافة");
   assert.match(translate("Linked اسم. Marked present.", "ar"), /اسم/);
   assert.equal(translate("not a known scanner line", "ar"), "not a known scanner line");
 });
@@ -1005,6 +1025,13 @@ test("log.json adds a print, replaces it, and drops a file removed from disk", a
   assert.equal(replaced.filter((row) => row.studentId === "7").length, 1);
   assert.equal(replaced.find((row) => row.studentId === "7").capturedAt, "2026-10-03T11:00:00.000Z");
   assert.equal(replaced.find((row) => row.studentId === "7").templateFile, "s-7.txt");
+
+  await writeFile(templatePath(dir, "s-7--2.txt"), Buffer.from("second"));
+  await saveIndex(dir, index);
+  const kept = JSON.parse(await readFile(logPath(dir), "utf8"));
+  assert.equal(kept.find((row) => row.studentId === "7").templateFile, "s-7.txt");
+  assert.equal(await readFile(templatePath(dir, "s-7.txt"), "utf8"), "sample-replaced");
+  assert.equal(await readFile(templatePath(dir, "s-7--2.txt"), "utf8"), "second");
 
   await rm(templatePath(dir, "s-2.txt"));
   await saveIndex(dir, index);

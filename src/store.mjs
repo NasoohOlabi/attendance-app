@@ -40,6 +40,20 @@ export function nextSampleFile(primaryFile, existingNames) {
   return `${stem}--${n}.txt`;
 }
 
+/** Local names for one student: the primary file and every s-name--N extra. Other students stay out. */
+export function studentTemplateNames(student, existingNames) {
+  const primary = String(student?.primaryFile || templateFileForStudent(student) || "");
+  if (!/^([st]-).+\.txt$/i.test(primary) || path.basename(primary) !== primary) return [];
+  const stem = templateStem(primary);
+  const extra = `${stem}--`;
+  return (existingNames || []).filter((name) => {
+    const file = String(name || "");
+    if (!file || path.basename(file) !== file || !/^[st]-.+\.txt$/i.test(file)) return false;
+    const sid = templateStem(file);
+    return sid === stem || sid.startsWith(extra);
+  });
+}
+
 /** Filenames for scans saved together, in order. The first free name is the primary template. */
 export function planBatchFiles(primaryFile, existingNames, scanCount) {
   const count = Number(scanCount);

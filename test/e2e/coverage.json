@@ -4,6 +4,7 @@
     "a protected attendance cell reports the failure and retains the queued mark",
     "a roster student without an id can match locally but cannot be marked present",
     "a saved pending print is offered for assignment after restart",
+    "a second assignment adds a print and keeps the first",
     "a timed-out capture neither marks attendance nor opens enrollment, and the next capture works",
     "account settings offer file import without a raw key text field",
     "assigning an unknown print by id marks the right same-name student and matches it later",

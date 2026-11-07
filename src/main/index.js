@@ -70,6 +70,7 @@ import {
   sheetProblem,
   studentKey,
   planBatchFiles,
+  studentTemplateNames,
   templateFileForStudent,
   templatePath,
   writeLog,
@@ -510,12 +511,14 @@ function lastMatchOf(student, at) {
   };
 }
 
-function viewStudent(student) {
+function viewStudent(student, names = []) {
+  const printCount = studentTemplateNames(student, names).length;
   return {
     key: student.rowNumber ? String(student.rowNumber) : studentKey(student),
     studentId: student.studentId || "",
     studentName: student.studentName || "",
-    hasPrint: Boolean(student.templateFile),
+    hasPrint: printCount > 0 || Boolean(student.templateFile),
+    printCount,
   };
 }
 
@@ -1443,6 +1446,7 @@ async function listTemplateNames(config) {
   }
 }
 
+/** Write each body to the next free template name. Older prints for this student stay. */
 async function writeBatch(config, student, bodies) {
   const primary = templateFileForStudent(student);
   const files = planBatchFiles(primary, await listTemplateNames(config), bodies.length);
@@ -1587,51 +1591,27 @@ async function assignStudent(key) {
   const config = currentConfig;
   const batchSave = collecting && batch.length > 0;
   if (!batchSave && !pending) throw new Error("No fingerprint is waiting.");
-  const templateFile = templateFileForStudent(student);
-  let uploadBody = null;
-  let draft;
-  let savedCount = 1;
   let savedBodies = [];
-  if (!batchSave) {
-    uploadBody = await readFile(pendingPath(config.fingerprintDir));
+  if (batchSave) {
+    savedBodies = batch.slice();
+  } else {
+    const uploadBody = await readFile(pendingPath(config.fingerprintDir));
     if (!uploadBody.length) throw new Error("The saved print is empty.");
-    draft = {
-      studentId: student.studentId || "",
-      studentName: student.studentName || "",
-      rowNumber: student.rowNumber,
-      templateFile,
-      capturedAt: new Date().toISOString(),
-    };
+    savedBodies = [uploadBody];
   }
+  const savedCount = savedBodies.length;
 
   publish({
     phase: "linking",
-    detail: batchSave ? "Saving these scans…" : "Saving this print…",
+    detail: savedCount > 1 ? "Saving these scans…" : "Saving this print…",
     error: "",
     enroll: null,
   });
+  const saved = await writeBatch(config, student, savedBodies);
+  const draft = saved.draft;
   if (batchSave) {
-    savedBodies = batch.slice();
-    savedCount = savedBodies.length;
-    const saved = await writeBatch(config, student, savedBodies);
-    draft = saved.draft;
     batch = [];
     collecting = false;
-  } else {
-    const names = await listTemplateNames(config);
-    const stem = templateFile.replace(/\.txt$/i, "").toLowerCase();
-    for (const name of names) {
-      const sid = name.replace(/\.txt$/i, "").toLowerCase();
-      if (sid.startsWith(`${stem}--`) || (name !== templateFile && sid === stem)) {
-        await rm(templatePath(config.fingerprintDir, name), { force: true });
-      }
-    }
-    savedBodies = [uploadBody];
-    const index = await loadIndex(config.fingerprintDir);
-    await writeFile(templatePath(config.fingerprintDir, templateFile), uploadBody);
-    putStudent(index, draft);
-    index.pending = null;
-    await saveIndex(config.fingerprintDir, index);
   }
   const index = await loadIndex(config.fingerprintDir);
   index.pending = null;
@@ -1674,7 +1654,7 @@ async function assignStudent(key) {
     ...(hadGallery ? { scanImage: scanImageUrl() } : {}),
   });
   if (config.attendanceDestination === "bouty") loadBoutyProfile(draft, draft.capturedAt);
-  console.log(`linked ${who} file=${templateFile} scans=${savedCount}`);
+  console.log(`linked ${who} file=${draft.templateFile} scans=${savedCount}`);
 }
 
 function watchWindow(win) {
@@ -1787,11 +1767,19 @@ function registerIpc() {
           if (currentConfig?.attendanceDestination !== "bouty") return [];
           const choices = boutyStudentChoices(profiles, index.students);
           if (profiles.length && !choices.length) throw new Error("Bouty students need an unambiguous source ID.");
+          const names = await listTemplateNames(config);
           return choices.map((student) => {
             const key = `bouty:${student.siteId}`;
             cached[key] = student;
             boutyNames.set(student.studentId, student.studentName);
-            return { key, studentId: student.studentId, studentName: student.studentName, hasPrint: Boolean(student.templateFile) };
+            const printCount = studentTemplateNames(student, names).length;
+            return {
+              key,
+              studentId: student.studentId,
+              studentName: student.studentName,
+              hasPrint: printCount > 0 || Boolean(student.templateFile),
+              printCount,
+            };
           });
         });
         boutySearch = { query: text, until: Date.now() + 30000, promise };
@@ -1800,7 +1788,8 @@ function registerIpc() {
       try { return { students: await boutySearch.promise, error: "" }; }
       catch (error) { return { students: [], error: error?.message?.startsWith("Bouty") ? error.message : "Bouty student information is unavailable." }; }
     }
-    return fuzzyStudents(Object.values(cached), query).map(viewStudent);
+    const names = currentConfig ? await listTemplateNames(currentConfig) : [];
+    return fuzzyStudents(Object.values(cached), query).map((student) => viewStudent(student, names));
   });
   ipcMain.handle("assign", async (_event, key) => {
     try {

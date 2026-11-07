@@ -129,8 +129,7 @@ const AR = {
   Student: "طالب",
   Yes: "نعم",
   No: "لا",
-  "add scans": "إضافة مسحات",
-  replace: "استبدال",
+  add: "إضافة",
   "Waiting for a finger": "بانتظار إصبع",
   Waited: "انتظر",
   "Scanner ready": "الماسح جاهز",
@@ -196,6 +195,14 @@ function ltr(value) {
   return `\u2066${value}\u2069`;
 }
 
+function prints(n) {
+  const count = Number(n);
+  if (count === 1) return "بصمة واحدة";
+  if (count === 2) return "بصمتان";
+  if (count >= 3 && count <= 10) return `${count} بصمات`;
+  return `${count} بصمة`;
+}
+
 function scans(n) {
   const count = Number(n);
   if (count === 1) return "مسحة واحدة";
@@ -217,6 +224,9 @@ function pattern(value) {
 
   match = value.match(/^Done · (\d+) scans?$/);
   if (match) return `تم · ${scans(match[1])}`;
+
+  match = value.match(/^(\d+) prints?$/);
+  if (match) return prints(match[1]);
 
   match = value.match(/^Scanner CLI not found at (.+)$/);
   if (match) return `لم يُعثر على الماسح في ${ltr(match[1])}`;

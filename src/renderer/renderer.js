@@ -55,7 +55,6 @@ let picker = false;
 let configOpen = false;
 let filterGen = 0;
 let linking = false;
-let batchAssign = false;
 let listLoading = false;
 let lastState = null;
 let confirmRequest = null;
@@ -245,7 +244,9 @@ function renderList(students) {
     sub.className = "sub";
     const bits = [];
     if (student.studentId && student.studentId !== student.studentName) bits.push(student.studentId);
-    if (student.hasPrint) bits.push(translate(batchAssign ? "add scans" : "replace"));
+    const prints = Number(student.printCount) || 0;
+    if (prints > 0) bits.push(translate(prints === 1 ? "1 print" : `${prints} prints`));
+    else if (student.hasPrint) bits.push(translate("add"));
     sub.textContent = bits.join(" · ");
     button.append(name, sub);
     button.addEventListener("click", () => choose(student.key));
@@ -561,7 +562,6 @@ function render(state) {
   picker = mode === "pending";
   configOpen = mode === "config";
   linking = state.phase === "linking";
-  batchAssign = Boolean(state.enroll?.count);
   show(mode);
   renderToday(state.present);
   renderDashboard(state.dashboard);
