@@ -29,6 +29,7 @@ const empty = document.querySelector("#empty");
 const error = document.querySelector("#error");
 const sync = document.querySelector("#sync");
 const settings = document.querySelector("#settings");
+const attendance = document.querySelector("#attendance");
 const update = document.querySelector("#update");
 const updateDialog = document.querySelector("#update-dialog");
 const updateDialogDetail = document.querySelector("#update-dialog-detail");
@@ -219,10 +220,14 @@ function show(name) {
   ready.hidden = dashboardOpen || name !== "ready";
   pending.hidden = name !== "pending";
   config.hidden = name !== "config";
-  settings.hidden = name === "config" || linking;
-  dashboard.hidden = dashboardOpen || name !== "ready";
+  settings.hidden = linking;
+  dashboard.hidden = name !== "ready";
   dashboardView.hidden = !dashboardOpen;
   ready.classList.toggle("ready", name === "ready");
+  const current = dashboardOpen ? "dashboard" : name === "config" ? "settings" : name === "ready" ? "attendance" : "";
+  attendance.setAttribute("aria-current", current === "attendance" ? "page" : "false");
+  dashboard.setAttribute("aria-current", current === "dashboard" ? "page" : "false");
+  settings.setAttribute("aria-current", current === "settings" ? "page" : "false");
 }
 
 function renderList(students) {
@@ -636,6 +641,16 @@ dashboardClose.addEventListener("click", () => {
   dashboardOpen = false;
   show("ready");
 });
+attendance.addEventListener("click", () => {
+  const settingsOpen = !config.hidden;
+  dashboardOpen = false;
+  if (settingsOpen) {
+    show("config");
+    window.attendance.closeSettings();
+    return;
+  }
+  show(screenForPhase(lastState?.phase));
+});
 
 let searchTimer;
 search.addEventListener("input", () => {
@@ -694,7 +709,11 @@ document.querySelector("#more-scans").addEventListener("click", async () => {
   }
 });
 document.querySelector("#enroll-done").addEventListener("click", () => window.attendance.finishEnroll());
-settings.addEventListener("click", () => window.attendance.openSettings());
+settings.addEventListener("click", () => {
+  if (!config.hidden) return;
+  dashboardOpen = false;
+  window.attendance.openSettings();
+});
 update.addEventListener("click", async () => {
   update.disabled = true;
   try {
