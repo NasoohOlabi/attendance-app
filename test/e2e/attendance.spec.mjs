@@ -1,3 +1,5 @@
+import { writeFile } from "node:fs/promises";
+import path from "node:path";
 import { test, expect } from "./fixtures/app.mjs";
 
 const id = "00 00 000 001";
@@ -207,6 +209,53 @@ test("outbox keeps the saved student visible while the sheet reload is delayed",
   await expect.poll(async () => (await app.outbox()).items.length).toBe(0);
   await expect(app.page.locator("#today-count")).toHaveText("1");
   reload.release();
+});
+
+test("startup while offline says the student list could not be loaded", async ({ app }) => {
+  await app.ready();
+  app.sheets.offline = true;
+  await app.restart();
+  await expect(app.page.locator("#sync")).toHaveText("The student list could not be loaded. The computer is offline.");
+  await expect(app.page.locator("#detail")).toHaveText("Listening");
+  await expect(app.page.locator("#error")).toBeHidden();
+});
+
+test("syncing students while marks are waiting stays on waiting to sync", async ({ app }) => {
+  await app.ready();
+  await app.seedPrint();
+  app.sheets.offline = true;
+  await app.mark();
+  await expect(app.page.locator("#sync")).toHaveText("Waiting to sync");
+  await app.page.locator("#settings").click();
+  await app.page.locator("#sync-students").click();
+  await expect(app.page.locator("#sync")).toHaveText("Waiting to sync");
+  await expect(app.page.locator("#error")).toBeHidden();
+  await expect.poll(async () => (await app.outbox()).items.length).toBe(1);
+});
+
+test("undo and clock follow the queued id when the sheet row is unknown", async ({ app }) => {
+  await app.ready();
+  const at = "2026-10-12T13:55:03.000Z";
+  await writeFile(path.join(app.home, "Masjid/attendance-outbox.json"), JSON.stringify({
+    items: [
+      { kind: "present", studentId: id, studentName: "أحمد طالب", rowNumber: 0, at, time: "16:55", logRow: 0, cell: false, log: false, exactTime: true },
+      { kind: "present", studentId: "00 00 000 002", studentName: "طالب ثان", rowNumber: 0, at, time: "16:55", logRow: 0, cell: false, log: false, exactTime: true },
+    ],
+  }));
+  app.sheets.offline = true;
+  await app.restart();
+  await expect(app.page.locator("#today-count")).toHaveText("2");
+  await expect(app.page.locator("#sync")).toHaveText("Waiting to sync");
+  const second = app.page.locator("#today-list li").nth(1).locator("input[type=time]");
+  await second.fill("17:20");
+  await second.dispatchEvent("change");
+  await expect.poll(async () => (await app.outbox()).items.find((item) => item.studentId === "00 00 000 002")).toMatchObject({ kind: "present", time: "17:20" });
+  expect((await app.outbox()).items.find((item) => item.studentId === id)).toMatchObject({ kind: "present", time: "16:55" });
+  await app.page.locator("#today-list li").nth(0).locator(".today-undo").click();
+  await app.page.locator("#confirm-ok").click();
+  await expect(app.page.locator("#today-count")).toHaveText("1");
+  await expect(app.page.locator("#today-list .today-name")).toHaveText("طالب ثان");
+  await expect.poll(async () => (await app.outbox()).items.map((item) => [item.studentId, item.kind, item.time])).toEqual([["00 00 000 002", "present", "17:20"]]);
 });
 
 test("outbox undo during a delayed cell write does not lose the next student's mark", async ({ app }) => {

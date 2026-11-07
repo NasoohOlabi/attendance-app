@@ -157,6 +157,7 @@ const AR = {
   "Scanner not ready": "الماسح غير جاهز",
   Setup: "الإعداد",
   "Waiting to sync": "بانتظار المزامنة",
+  "The student list could not be loaded. The computer is offline.": "تعذّر تحميل قائمة الطلاب. الجهاز غير متصل.",
   "Google Sheets is rate limited. Trying again in a minute.": "تجاوز جداول غوغل حد القراءة. المحاولة بعد دقيقة.",
   "Marked present.": "سُجّل حاضراً.",
   "Marked present. The time log was not written.": "سُجّل حاضراً. لم يُكتب سجل الوقت.",

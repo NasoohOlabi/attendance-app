@@ -63,6 +63,12 @@ export function isOfflineError(message) {
   );
 }
 
+/** A dropped sheet read stays on the sync line. A waiting queue keeps its existing status. */
+export function sheetOfflineNote(message, pending = false) {
+  if (!isOfflineError(message)) return "";
+  return pending ? "Waiting to sync" : "The student list could not be loaded. The computer is offline.";
+}
+
 export async function createGoogle(config, credentials = null) {
   if (credentials) {
     return new GoogleAuth({ credentials, scopes: SCOPES }).getClient();

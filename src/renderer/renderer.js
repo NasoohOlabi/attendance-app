@@ -407,9 +407,10 @@ function renderTrace(lines) {
 let todayKey = "";
 
 function presentItem(item) {
-  if (typeof item === "string") return { name: item, rowNumber: 0, time: "", logRow: 0 };
+  if (typeof item === "string") return { name: item, studentId: "", rowNumber: 0, time: "", logRow: 0 };
   return {
     name: item?.name || "",
+    studentId: item?.studentId || "",
     rowNumber: Number(item?.rowNumber) || 0,
     time: item?.time || "",
     logRow: Number(item?.logRow) || 0,
@@ -499,7 +500,7 @@ async function undoToday(person) {
     confirmLabel: "Remove",
   });
   if (!accepted) return;
-  const result = await window.attendance.undoAttendance({ rowNumber: person.rowNumber, logRow: person.logRow });
+  const result = await window.attendance.undoAttendance({ studentId: person.studentId, rowNumber: person.rowNumber, logRow: person.logRow });
   if (!result?.ok && result?.error) {
     error.hidden = false;
     error.textContent = translate(result.error);
@@ -515,6 +516,7 @@ async function saveTodayTime(person, input) {
     return;
   }
   const result = await window.attendance.setAttendanceTime({
+    studentId: person.studentId,
     rowNumber: person.rowNumber,
     logRow: person.logRow,
     time: input.value,

@@ -696,6 +696,16 @@ export function attendanceListed(people, person) {
   return (people || []).some((item) => sameAttendance(item, person));
 }
 
+/** The Marif id selects the person. The sheet row is only used when that id is missing. */
+export function personOnList(people, wanted = {}) {
+  const list = people || [];
+  const id = canonicalStudentId(wanted.studentId);
+  if (id) return list.find((item) => canonicalStudentId(item.studentId) === id) || null;
+  const row = Number(wanted.rowNumber) || 0;
+  if (!row) return null;
+  return list.find((item) => Number(item.rowNumber) === row) || null;
+}
+
 function sameQueuedDestination(a, b) {
   return (a?.destination || "sheet") === (b?.destination || "sheet");
 }

@@ -16,6 +16,7 @@ import {
   createGoogle,
   explainApiFailure,
   isOfflineError,
+  sheetOfflineNote,
   isSheetPermissionError,
   appendSheetRow,
   clearSheetBelowHeader,
@@ -52,6 +53,7 @@ import {
   logHits,
   logLayout,
   overlayPresent,
+  personOnList,
   queueAbsent,
   queueClock,
   queuePresent,
@@ -435,6 +437,18 @@ async function failureNote(config, err) {
   return explainApiFailure(err?.message || "", await accountEmail(config));
 }
 
+function publishOffline(message, gen) {
+  const note = sheetOfflineNote(message, outbox.length > 0);
+  if (!note) return false;
+  const patch = { syncNote: note, error: "" };
+  if (String(state.detail || "").startsWith("Syncing")) patch.detail = "Listening";
+  if (savedScreen && String(savedScreen.detail || "").startsWith("Syncing")) {
+    savedScreen = { ...savedScreen, detail: "Listening" };
+  }
+  publish(patch, gen);
+  return true;
+}
+
 async function writeConfigFile(config, patch) {
   let file = {};
   try {
@@ -705,9 +719,14 @@ async function acceptPresent(student) {
   return { op: "update", value: "حاضر" };
 }
 
-async function acceptAbsent(rowNumber, logRow) {
-  const person = shownPresent().find((item) => item.rowNumber === Number(rowNumber));
+function selectedPerson(input) {
+  return personOnList(shownPresent(), { studentId: input?.studentId, rowNumber: input?.rowNumber });
+}
+
+async function acceptAbsent(input) {
+  const person = selectedPerson(input);
   if (!person) return { ok: false, error: "That student is not on the sheet." };
+  const logRow = Number(input?.logRow) || 0;
   const destination = currentConfig?.attendanceDestination || "sheet";
   if (destination === "bouty" && boutySync) {
     try { await boutySync.enqueue(person.studentId, "absent", new Date().toISOString(), rosterStudent(person).studentName); void boutySync.sync(); }
@@ -721,12 +740,13 @@ async function acceptAbsent(rowNumber, logRow) {
   return { ok: true };
 }
 
-function acceptClock(rowNumber, logRow, time) {
-  const stamp = stampFromClock(new Date(), time);
+function acceptClock(input) {
+  const stamp = stampFromClock(new Date(), input?.time);
   if (!stamp) return { ok: false, error: "Enter a time like 16:55." };
-  const person = shownPresent().find((item) => item.rowNumber === Number(rowNumber));
+  const person = selectedPerson(input);
   if (!person) return { ok: false, error: "That student is not on the sheet." };
   const clock = clockFromStamp(stamp);
+  const logRow = Number(input?.logRow) || 0;
   outbox = queueClock(outbox, { ...person, destination: currentConfig?.attendanceDestination || "sheet", at: new Date().toISOString(), time: clock, logRow }, activeWrite);
   rememberClock(person.rowNumber, clock);
   saveOutbox().catch((err) => console.error(err.message));
@@ -1296,7 +1316,7 @@ async function prepareGoogle(config, gen) {
     client = await createGoogle(config, await credentialStore(config).read());
   } catch (err) {
     client = null;
-    publish({ error: err.message }, gen);
+    if (!publishOffline(err.message, gen)) publish({ error: err.message }, gen);
   }
   return config;
 }
@@ -1325,10 +1345,13 @@ async function runLoop(config, gen) {
         void flushOutbox();
       });
     } catch (err) {
-      const note = await failureNote(config, err);
       if (isSheetPermissionError(err.message)) sheetDenied = true;
-      console.log(note);
-      publish({ syncNote: note, error: note }, gen);
+      if (publishOffline(err.message, gen)) console.error(err.message);
+      else {
+        const note = await failureNote(config, err);
+        console.log(note);
+        publish({ syncNote: note, error: note }, gen);
+      }
     } finally {
       sheetReady = true;
     }
@@ -2078,6 +2101,7 @@ function registerIpc() {
       });
       return { ok: true };
     } catch (err) {
+      if (publishOffline(err?.message)) return { ok: false };
       const message = err?.message || "The sheet is not available.";
       publish({ syncNote: message, error: message });
       return { ok: false, error: message };
@@ -2085,12 +2109,12 @@ function registerIpc() {
   });
   ipcMain.handle("undoAttendance", async (_event, input) => {
     if (!currentConfig) return { ok: false, error: "The sheet is not available." };
-    return acceptAbsent(Number(input?.rowNumber), Number(input?.logRow) || 0);
+    return acceptAbsent(input);
   });
   ipcMain.handle("setAttendanceTime", async (_event, input) => {
     if (!currentConfig) return { ok: false, error: "The sheet is not available." };
     if (!currentConfig.logSpreadsheetId) return { ok: false, error: "No time log sheet is configured." };
-    return acceptClock(Number(input?.rowNumber), Number(input?.logRow) || 0, input?.time);
+    return acceptClock(input);
   });
   ipcMain.handle("clearFingerprints", async () => {
     if (!currentConfig?.fingerprintDir) return { ok: false, error: "The app is still starting." };

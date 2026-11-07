@@ -8,7 +8,7 @@ import { legacyUserDataPath, LEGACY_USER_DATA_DIR, loadConfig, requireGoogleConf
 import { appendAppLog, appLogFile, appLogLine } from "../src/log.mjs";
 import { updaterChannel, updaterErrorDetails, updaterInfoDetails, updaterShouldOffer } from "../src/update.mjs";
 import { attendanceTrend } from "../src/trend.mjs";
-import { attendanceCellUpdate, createGoogle, explainApiFailure, isOfflineError } from "../src/google.mjs";
+import { attendanceCellUpdate, createGoogle, explainApiFailure, isOfflineError, sheetOfflineNote } from "../src/google.mjs";
 import { translate } from "../src/renderer/i18n.js";
 import { fingerCue, presentTrace, screenForPhase } from "../src/renderer/view.js";
 import { appendScanTrace, beginScanAttempt, captureKillDelay, formatCommand, identifyArgs, interpretIdentify, interpretScan, mergeCapturedFiles, nextCapture, planScanRetry, scanArgs, SCAN_OUTAGE_MESSAGE, SCAN_RETRY_PAUSE_MS } from "../src/scan.mjs";
@@ -47,6 +47,7 @@ import {
   fingerprintSheetRow,
   FINGERPRINT_HEADER,
   overlayPresent,
+  personOnList,
   planAttendance,
   queueAbsent,
   queueClock,
@@ -674,10 +675,16 @@ test("a mark shows up before the sheet answers, and an early undo cancels it", (
   assert.deepEqual(overlayPresent([{ name: "اسم أول", studentId: "00 00 000 001", rowNumber: 3, time: "08:00", logRow: 4 }], undo, day), []);
   const half = [{ ...edited[0], cell: true, log: false }];
   assert.equal(queueAbsent(half, person)[0].log, false);
-  assert.equal(isOfflineError("Google API GET https://sheets.googleapis.com failed (no status): getaddrinfo ENOTFOUND"), true);
+  const offline = "Google API GET https://sheets.googleapis.com failed (no status): getaddrinfo ENOTFOUND";
+  assert.equal(isOfflineError(offline), true);
   assert.equal(isOfflineError("The caller does not have permission"), false);
   assert.equal(isOfflineError("Google Sheets is rate limited. Trying again in a minute."), true);
   assert.equal(isOfflineError("Google API GET https://sheets.googleapis.com failed (429): rateLimitExceeded"), true);
+  assert.equal(sheetOfflineNote(offline, true), "Waiting to sync");
+  assert.equal(sheetOfflineNote("The caller does not have permission", true), "");
+  const empty = sheetOfflineNote(offline, false);
+  assert.equal(empty, "The student list could not be loaded. The computer is offline.");
+  assert.equal(translate(empty, "ar"), "تعذّر تحميل قائمة الطلاب. الجهاز غير متصل.");
 });
 
 test("undo and clock changes preserve an active write until it completes", () => {
@@ -693,6 +700,26 @@ test("undo and clock changes preserve an active write until it completes", () =>
   assert.deepEqual(edited.map((item) => [item.kind, item.time]), [["present", "08:00"], ["time", "08:15"]]);
   const afterUndo = queuePresent(undo, person, undo[1]);
   assert.deepEqual(afterUndo.map((item) => item.kind), ["present", "absent"]);
+});
+
+test("undo and clock follow the id when queued marks share an unknown row", () => {
+  const at = "2026-10-10T05:00:00.000Z";
+  const day = "10/10/2026";
+  const first = { studentId: "00 00 000 001", studentName: "اسم أول", rowNumber: 0, at, time: "08:00" };
+  const second = { studentId: "00 00 000 002", studentName: "اسم ثان", rowNumber: 0, at, time: "08:05" };
+  const queued = queuePresent(queuePresent([], first), second);
+  const shown = overlayPresent([], queued, day);
+  assert.equal(personOnList(shown, { rowNumber: 0 }), null);
+  const target = personOnList(shown, { studentId: second.studentId, rowNumber: 0 });
+  assert.equal(target.studentId, second.studentId);
+  const edited = queueClock(queued, { ...target, at, time: "08:15" });
+  assert.deepEqual(edited.map((item) => [item.studentId, item.kind, item.time]), [
+    [first.studentId, "present", "08:00"],
+    [second.studentId, "present", "08:15"],
+  ]);
+  const other = personOnList(overlayPresent([], edited, day), { studentId: first.studentId, rowNumber: 0 });
+  const undone = queueAbsent(edited, { ...other, at });
+  assert.deepEqual(undone.map((item) => [item.studentId, item.time]), [[second.studentId, "08:15"]]);
 });
 
 test("a present mark puts the حاضر checkbox back on that cell", () => {

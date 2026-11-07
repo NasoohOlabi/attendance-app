@@ -49,13 +49,16 @@
     "service account import uses Windows encryption and survives restart without the source file",
     "settings cancel discards edits",
     "settings save persists editable values without dropping Pages configuration",
+    "syncing students while marks are waiting stays on waiting to sync",
     "shows the matched roster values and omits date and blank cells",
     "smoke keeps settings reachable when the scanner path is missing",
     "smoke uses the real preload and isolated built Electron app",
     "startup restores remote prints and retains local prints absent from the sheet",
+    "startup while offline says the student list could not be loaded",
     "the print protocol serves the current capture and rejects an unknown slot",
     "today names scroll inside the ready area while the window stays fixed",
     "unassigned scans collected after More are dropped when the app restarts",
     "undo after a roster reorder clears the selected id after sync resumes",
+    "undo and clock follow the queued id when the sheet row is unknown",
     "uses the same Damascus day for the checkbox and the log across the new year"
 ]
