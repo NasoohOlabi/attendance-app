@@ -39,7 +39,6 @@ import {
   loadIndex,
   mergeStudents,
   nextGoogleAttendance,
-  attendanceListed,
   attendanceLogRow,
   attendanceStamp,
   attachLogTimes,
@@ -62,6 +61,7 @@ import {
   printsToRestore,
   queueAbsent,
   queueClock,
+  queueManualPresent,
   queuePresent,
   queuePrintDelete,
   queuePrintDeleteAll,
@@ -771,12 +771,16 @@ async function acceptPresent(student) {
   const person = queuedFrom(student);
   person.destination = currentConfig?.attendanceDestination || "sheet";
   if (!person.studentId) return { op: "missing-id" };
+  const next = queueManualPresent(outbox, sheetPeople, person, activeWrite);
+  if (next === outbox) {
+    publishShown({ detail: "Already here today." });
+    return { op: "update", value: "حاضر" };
+  }
   if (person.destination === "bouty" && boutySync) {
     try { await boutySync.enqueue(person.studentId, "present", person.at, person.studentName); void boutySync.sync(); }
     catch { publishBouty("Bouty: attendance could not be queued."); }
   }
-  if (attendanceListed(shownPresent(), person)) return { op: "update", value: "حاضر" };
-  outbox = queuePresent(outbox, person, activeWrite);
+  outbox = next;
   if (person.rowNumber) rememberScan(person.rowNumber, new Date());
   saveOutbox().catch((err) => console.error(err.message));
   publishShown();
@@ -2260,6 +2264,19 @@ function registerIpc() {
     } catch (err) {
       if (publishOffline(err?.message)) return { ok: false };
       const message = err?.message || "The sheet is not available.";
+      console.error(message);
+      const shown = sheetWindow(describeApiFailure(message));
+      publish(shown);
+      return { ok: false, error: shown.error };
+    }
+  });
+  ipcMain.handle("markPresent", async (_event, student) => {
+    try {
+      const result = await acceptPresent(student);
+      if (result?.op === "missing-id") return { ok: false, error: "This student has no Marif id." };
+      return { ok: true };
+    } catch (err) {
+      const message = err?.message || "The sheet could not be updated.";
       console.error(message);
       const shown = sheetWindow(describeApiFailure(message));
       publish(shown);

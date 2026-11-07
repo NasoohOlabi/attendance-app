@@ -57,6 +57,7 @@ import {
   printsToRestore,
   queueAbsent,
   queueClock,
+  queueManualPresent,
   queuePresent,
   queuePrintDelete,
   queuePrintDeleteAll,
@@ -768,6 +769,25 @@ test("today's saved list returns for the same day and the outbox still wins", ()
   const clocked = overlayPresent(todayPeople(saved, day), queueClock([], { studentId: "00 00 000 001", studentName: "اسم أول", at, time: "09:00" }), day);
   assert.equal(clocked[0].time, "09:00");
   assert.deepEqual(overlayPresent(todayPeople(saved, day), queueAbsent([], { studentId: "00 00 000 001", studentName: "اسم أول", at }), day), []);
+});
+
+test("a manual mark queues the same present as a match and does not double-mark", () => {
+  const at = "2026-10-10T05:00:00.000Z";
+  const person = { studentId: "00 00 000 001", studentName: "اسم أول", rowNumber: 3, at, time: "08:00", exactTime: true };
+  const queued = queueManualPresent([], [], person);
+  const matched = queuePresent([], person);
+  assert.equal(queued.length, 1);
+  assert.deepEqual(
+    [queued[0].kind, queued[0].studentId, queued[0].time, queued[0].exactTime],
+    [matched[0].kind, matched[0].studentId, matched[0].time, matched[0].exactTime],
+  );
+  const later = queueManualPresent(queued, [], { ...person, at: "2026-10-10T06:00:00.000Z", time: "09:00" });
+  assert.equal(later, queued);
+  assert.equal(later[0].time, "08:00");
+  assert.deepEqual(queueManualPresent([], [{ name: "اسم أول", studentId: "00 00 000 001", time: "08:00" }], { ...person, time: "09:00" }), []);
+  const bouty = queueManualPresent([], [], { ...person, destination: "bouty" });
+  assert.equal(bouty[0].destination, "bouty");
+  assert.equal(queueManualPresent(bouty, [], { ...person, destination: "bouty", time: "09:15" }), bouty);
 });
 
 test("a repeat present keeps an existing arrival stamp and still writes one when the log is empty", () => {

@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld("attendance", {
   listPrints: (query) => ipcRenderer.invoke("listPrints", query),
   deleteStudentPrints: (key) => ipcRenderer.invoke("deleteStudentPrints", key),
   clearFingerprints: () => ipcRenderer.invoke("clearFingerprints"),
+  markPresent: (student) => ipcRenderer.invoke("markPresent", student),
   undoAttendance: (input) => ipcRenderer.invoke("undoAttendance", input),
   setAttendanceTime: (input) => ipcRenderer.invoke("setAttendanceTime", input),
   closeSettings: () => ipcRenderer.invoke("closeSettings"),

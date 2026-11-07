@@ -128,6 +128,11 @@ const AR = {
   "Arabic font": "خط العربية",
   "Scanned finger": "الإصبع الممسوح",
   "Remove from today?": "إزالة من اليوم؟",
+  "Mark without a finger": "سجّل بلا إصبع",
+  "Mark without a finger?": "تسجيل بلا إصبع؟",
+  "Mark present": "سجّل حاضر",
+  "Already here today.": "حاضر اليوم.",
+  "This student has no Marif id.": "لا يوجد معرف لهذا الطالب.",
   "Today's cell is cleared. The time logged for today is removed. Other days stay.":
     "تُمسح خلية اليوم، ويُحذف وقت اليوم من السجل. بقية الأيام تبقى.",
   Remove: "إزالة",
