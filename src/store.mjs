@@ -710,9 +710,91 @@ function sameQueuedDestination(a, b) {
   return (a?.destination || "sheet") === (b?.destination || "sheet");
 }
 
-/** Finish Pages writes after a switch without writing new daily-grid cells. */
+/** Finish Pages writes after a switch without writing new daily-grid cells. A fingerprint delete still runs. */
 export function nextGoogleAttendance(items, destination) {
-  return (items || []).find((item) => destination !== "bouty" || item.destination === "bouty" || item.kind === "time" || item.cell);
+  return (items || []).find((item) => item.kind === "prints" || item.kind === "prints-all" || destination !== "bouty" || item.destination === "bouty" || item.kind === "time" || item.cell);
+}
+
+/** Today's present list for one Damascus day. Another day does not reuse it. */
+export function todayRecord(people, day) {
+  return {
+    day: String(day || ""),
+    people: (people || []).map((person) => ({
+      name: String(person.name || person.studentName || "").trim(),
+      studentId: canonicalStudentId(person.studentId) || String(person.studentId || "").trim(),
+      rowNumber: Number(person.rowNumber) || 0,
+      time: String(person.time || "").trim(),
+      logRow: Number(person.logRow) || 0,
+    })).filter((person) => person.name || person.studentId),
+  };
+}
+
+export function todayPeople(saved, day) {
+  if (!saved || saved.day !== day || !Array.isArray(saved.people)) return [];
+  return todayRecord(saved.people, day).people;
+}
+
+export function snapshotRows(saved) {
+  return Array.isArray(saved?.rows) ? saved.rows : [];
+}
+
+/** True when that date cell is already the حاضر checkbox. */
+export function attendanceCellPresent(rows, rowNumber, columnIndex) {
+  if (!rowNumber || columnIndex == null || columnIndex < 0) return false;
+  return isPresentMark(rows?.[rowNumber - 1]?.[columnIndex]);
+}
+
+/** An existing stamp stays when the cell was already حاضر. An empty log still gets the scan stamp. */
+export function presentLogAction(alreadyPresent, hits, stamp) {
+  const hit = (hits || []).at(-1) || null;
+  if (alreadyPresent && hit?.stamp) return { op: "keep" };
+  if (!hit) return { op: "append" };
+  if (stamp && hit.stamp !== stamp) return { op: "replace", rowNumber: hit.rowNumber };
+  return { op: "keep" };
+}
+
+export function queuePrintDelete(items, studentId) {
+  const id = canonicalStudentId(studentId);
+  const list = items || [];
+  if (!id || list.some((item) => item.kind === "prints-all")) return list;
+  if (list.some((item) => item.kind === "prints" && canonicalStudentId(item.studentId) === id)) return list;
+  return [...list, { kind: "prints", studentId: id }];
+}
+
+export function queuePrintDeleteAll(items) {
+  return [...(items || []).filter((item) => item.kind !== "prints" && item.kind !== "prints-all"), { kind: "prints-all" }];
+}
+
+/** A new enroll keeps that id. A delete-all still clears every other row. */
+export function forgetQueuedPrintDelete(items, studentId) {
+  const id = canonicalStudentId(studentId);
+  if (!id) return items || [];
+  return (items || []).flatMap((item) => {
+    if (item.kind === "prints" && canonicalStudentId(item.studentId) === id) return [];
+    if (item.kind === "prints-all") {
+      const keep = [...new Set([...(item.keep || []).map((value) => canonicalStudentId(value)).filter(Boolean), id])];
+      return [{ ...item, keep }];
+    }
+    return [item];
+  });
+}
+
+export function pendingPrintDeletes(items) {
+  if ((items || []).some((item) => item.kind === "prints-all")) return { all: true, ids: [] };
+  const ids = [];
+  for (const item of items || []) {
+    if (item.kind !== "prints") continue;
+    const id = canonicalStudentId(item.studentId);
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  return { all: false, ids };
+}
+
+/** Pending deletes are not copied back from the sheet. A delete-all copies nothing. */
+export function printsToRestore(planned, pending) {
+  if (pending?.all) return [];
+  const skip = new Set(pending?.ids || []);
+  return (planned || []).filter((item) => !skip.has(canonicalStudentId(item.studentId)));
 }
 
 function queuedPerson(person, kind) {

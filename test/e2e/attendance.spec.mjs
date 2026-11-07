@@ -275,3 +275,28 @@ test("outbox undo during a delayed cell write does not lose the next student's m
   expect(app.sheets.grid("Info").rows[3][2]).toBe("حاضر");
   expect(app.sheets.grid("AttendanceLog").rows.map((row) => row[0])).toEqual(["الطالب", "00 00 000 002"]);
 });
+
+test("today's saved list and sheet snapshot survive an offline restart", async ({ app }) => {
+  await app.ready();
+  await app.seedPrint();
+  await app.mark();
+  await expect.poll(() => app.sheets.grid("AttendanceLog").rows.length).toBe(2);
+  const stamp = app.sheets.grid("AttendanceLog").rows[1][2];
+  await expect.poll(async () => (await app.outbox()).items.length).toBe(0);
+  await expect(app.page.locator("#today-count")).toHaveText("1");
+  const dashboard = (await app.state()).dashboard.map((item) => item.label);
+
+  app.sheets.offline = true;
+  await app.restart();
+  await expect(app.page.locator("#today-count")).toHaveText("1");
+  await expect(app.page.locator("#today-list .today-name")).toHaveText("أحمد طالب");
+  await expect(app.page.locator("#sync")).toHaveText("The student list could not be loaded. The computer is offline.");
+  expect((await app.state()).dashboard.map((item) => item.label)).toEqual(dashboard);
+
+  await app.mark();
+  await expect(app.page.locator("#last-fields")).toContainText("+963 900000001");
+  await expect(app.page.locator("#today-count")).toHaveText("1");
+  expect(app.sheets.grid("AttendanceLog").rows).toHaveLength(2);
+  expect(app.sheets.grid("AttendanceLog").rows[1][2]).toBe(stamp);
+  await expect.poll(async () => (await app.outbox()).items.length).toBe(0);
+});
