@@ -66,14 +66,14 @@ function renderUpdate(updateState) {
   if (!info.enabled) return;
   const labels = {
     idle: "Check for updates",
-    checking: "Checking for updatesâ€¦",
+    checking: "Checking for updates…",
     available: "Download update",
     "up-to-date": "Up to date",
     downloaded: "Restart to update",
     error: "Update unavailable",
   };
   const label = info.status === "downloading"
-    ? `${translate("Downloading updateâ€¦")} ${Math.max(0, Number(info.progress) || 0)}%`
+    ? `${translate("Downloading update…")} ${Math.max(0, Number(info.progress) || 0)}%`
     : translate(labels[info.status] || labels.idle);
   update.querySelector("span").textContent = label;
   update.disabled = info.status === "checking" || info.status === "downloading";
@@ -85,7 +85,7 @@ function renderUpdate(updateState) {
     updateProgress.value = progress;
     updateProgress.hidden = !["downloading", "downloaded"].includes(info.status);
     updateDialogDetail.textContent = info.status === "downloading"
-      ? `${translate("Downloading updateÃ¢â‚¬Â¦")} ${progress}%${info.error ? ` â€” ${info.error}` : ""}`
+      ? `${translate("Downloading update…")} ${progress}%${info.error ? ` — ${info.error}` : ""}`
       : info.error || translate(labels[info.status] || labels.idle);
     updateDialogAction.textContent = translate(info.status === "downloaded" ? "Restart to update" : info.status === "available" ? "Download update" : info.status === "error" ? "Try again" : "Check for updates");
     updateDialogAction.hidden = info.status === "checking" || info.status === "downloading";
@@ -241,7 +241,7 @@ function renderList(students) {
     const bits = [];
     if (student.studentId && student.studentId !== student.studentName) bits.push(student.studentId);
     if (student.hasPrint) bits.push(translate(batchAssign ? "add scans" : "replace"));
-    sub.textContent = bits.join(" Â· ");
+    sub.textContent = bits.join(" · ");
     button.append(name, sub);
     button.addEventListener("click", () => choose(student.key));
     item.append(button);
@@ -269,7 +269,7 @@ async function choose(key) {
 
 function fillConfig(state) {
   const cfg = state.config || {};
-  document.querySelector("#app-version").textContent = state.appVersion || state.update?.version || "â€”";
+  document.querySelector("#app-version").textContent = state.appVersion || state.update?.version || "—";
   document.querySelector("#cfg-destination").value = cfg.attendanceDestination || "sheet";
   showDestinationFields();
   document.querySelector("#cfg-sheet").value = cfg.spreadsheetId || "";
@@ -327,7 +327,7 @@ function renderServiceAccount(state) {
     imported: "Service account imported and encrypted.",
     locked: "The saved account cannot be opened. Import it again for this Windows user.",
   };
-  document.querySelector("#account-status").textContent = translate(importingAccount ? "Importing accountâ€¦" : messages[account.status] || messages.missing);
+  document.querySelector("#account-status").textContent = translate(importingAccount ? "Importing account…" : messages[account.status] || messages.missing);
   const email = document.querySelector("#account-email");
   email.textContent = account.email || "";
   email.hidden = !account.email;
@@ -409,7 +409,7 @@ function renderToday(names) {
     digits.dir = "ltr";
     todayCount.replaceChildren(digits);
   }
-  digits.textContent = known ? String(list.length) : "â€“";
+  digits.textContent = known ? String(list.length) : "–";
   todayEmpty.hidden = list.length > 0;
   todayEmpty.textContent = translate(known ? "No one yet" : "Loading the sheet");
   const key = JSON.stringify(list);
@@ -546,7 +546,7 @@ function render(state) {
   lastState = state;
   // Keep the installed build visible even when settings was already open.
   const version = document.querySelector("#app-version");
-  if (version) version.textContent = state.appVersion || state.update?.version || "â€”";
+  if (version) version.textContent = state.appVersion || state.update?.version || "—";
   renderUpdate(state.update);
   renderServiceAccount(state);
   document.querySelector("#bouty-status").textContent = translate(state.bouty?.message || (state.bouty?.enabled ? "Bouty account saved." : "Bouty is not configured."));
@@ -572,7 +572,7 @@ function render(state) {
     const enrollActions = document.querySelector("#enroll-actions");
     enrollActions.hidden = !state.enroll;
     document.querySelector("#enroll-done").textContent = state.enroll
-      ? translate(`Done Â· ${state.enroll.count} scan${state.enroll.count === 1 ? "" : "s"}`)
+      ? translate(`Done · ${state.enroll.count} scan${state.enroll.count === 1 ? "" : "s"}`)
       : translate("Done");
     if (state.lastMatch) {
       last.hidden = false;
@@ -586,7 +586,7 @@ function render(state) {
         id.textContent = state.lastMatch.studentId;
         lastMeta.append(id);
       }
-      if (state.lastMatch.studentId && when) lastMeta.append(document.createTextNode("  Â·  "));
+      if (state.lastMatch.studentId && when) lastMeta.append(document.createTextNode("  ·  "));
       if (when) {
         const time = document.createElement("span");
         time.dir = "ltr";

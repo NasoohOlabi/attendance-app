@@ -88,7 +88,7 @@ const AR = {
   "Sheet gid": "معرّف الورقة",
   "Prints are stored in": "البصمات محفوظة في",
   "Delete all fingerprints": "احذف كل البصمات",
-  "Sync student list": "?????? ????? ??????",
+  "Sync student list": "مزامنة قائمة الطلاب",
   Dashboard: "Dashboard",
   "Check for updates": "\u062a\u062d\u0642\u0642 \u0645\u0646 \u0627\u0644\u062a\u062d\u062f\u064a\u062b\u0627\u062a",
   "Update track": "مسار التحديث",

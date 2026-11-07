@@ -75,21 +75,23 @@
         </div>
         <aside id="today" class="today" data-i18n-aria="Here today" aria-label="Here today">
           <p class="label" data-i18n="Today">Today</p>
-          <p class="today-count" id="today-count"><span dir="ltr">â€“</span></p>
+          <p class="today-count" id="today-count"><span dir="ltr">–</span></p>
           <p id="today-empty" class="today-empty" data-i18n="Loading the sheet">Loading the sheet</p>
           <ol id="today-list" class="today-list"></ol>
         </aside>
       </section>
       <section id="dashboard-view" hidden>
         <div class="dashboard-head">
-          <div>
+          <button id="dashboard-close" class="secondary" type="button" data-i18n="Back">Back</button>
+          <div class="dashboard-title">
             <p class="kicker" data-i18n="Attendance trends">Attendance trends</p>
             <h1 data-i18n="By day">By day</h1>
           </div>
-          <button id="dashboard-close" class="secondary" type="button" data-i18n="Back">Back</button>
         </div>
-        <div id="trend" class="trend"></div>
-        <p id="trend-empty" class="detail" data-i18n="No attendance history yet." hidden>No attendance history yet.</p>
+        <div class="trend-frame">
+          <div id="trend" class="trend"></div>
+          <p id="trend-empty" class="detail" data-i18n="No attendance history yet." hidden>No attendance history yet.</p>
+        </div>
       </section>
       <section id="pending" hidden>
         <div class="hero">
@@ -133,7 +135,7 @@
           <span id="language-label" data-i18n="Language">Language</span>
           <div class="lang" role="group" dir="ltr" aria-labelledby="language-label">
             <button id="lang-en" class="secondary" type="button" data-lang="en" aria-pressed="true">English</button>
-            <button id="lang-ar" class="secondary" type="button" data-lang="ar" aria-pressed="false">Ø§Ù„Ø¹Ø±Ø¨ÙŠØ©</button>
+            <button id="lang-ar" class="secondary" type="button" data-lang="ar" aria-pressed="false">العربية</button>
           </div>
         </div>
         <div class="field">
@@ -211,7 +213,7 @@
       <div class="update-dialog-card">
         <div class="update-dialog-head">
           <strong id="update-dialog-title" data-i18n="Software update">Software update</strong>
-          <button id="update-dialog-close" class="ghost" type="button" aria-label="Close">Ã—</button>
+          <button id="update-dialog-close" class="ghost" type="button" aria-label="Close">×</button>
         </div>
         <p id="update-dialog-detail" class="detail"></p>
         <progress id="update-progress" max="100" value="0"></progress>
