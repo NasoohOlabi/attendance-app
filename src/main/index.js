@@ -449,17 +449,23 @@ async function failureNote(config, err) {
   return explainApiFailure(err?.message || "", await accountEmail(config));
 }
 
+/** A Google failure is a sentence plus a short line. Any other failure stays that one sentence. */
+function sheetWindow(described, { keepDetail = false } = {}) {
+  const developer = described.developer && described.developer !== described.operator ? described.developer : "";
+  const patch = { error: developer || described.operator };
+  if (keepDetail) patch.syncNote = outbox.length ? "Waiting to sync" : described.operator;
+  else if (developer) patch.syncNote = described.operator;
+  if (patch.syncNote === patch.error) delete patch.syncNote;
+  return patch;
+}
+
 /** The full request stays in the diagnostic log. The window gets one sentence and one short line. */
 async function publishSheetFailure(config, err, { gen, keepDetail = false } = {}) {
   const message = err?.message || String(err || "");
   console.error(message);
   if (publishOffline(message, gen)) return;
   const described = describeApiFailure(message, await accountEmail(config));
-  const patch = { error: described.developer };
-  if (keepDetail) patch.syncNote = outbox.length ? "Waiting to sync" : described.operator;
-  else patch.syncNote = described.operator;
-  if (described.operator === described.developer) patch.error = "";
-  publish(patch, gen);
+  publish(sheetWindow(described, { keepDetail }), gen);
 }
 
 function publishOffline(message, gen) {
@@ -1111,9 +1117,9 @@ async function showPending(config, gen, reason = "") {
     await reloadStudents(config);
   } catch (err) {
     console.error(err.message);
-    const described = describeApiFailure(err.message);
-    detail = described.operator || "The student list could not be loaded.";
-    error = described.developer;
+    const shown = sheetWindow(describeApiFailure(err.message));
+    detail = shown.syncNote || shown.error || "The student list could not be loaded.";
+    error = shown.error;
     const index = await loadIndex(config.fingerprintDir);
     cacheStudents(index.students);
   }
@@ -1402,8 +1408,7 @@ async function prepareGoogle(config, gen) {
     client = null;
     console.error(err.message);
     if (!publishOffline(err.message, gen)) {
-      const described = describeApiFailure(err.message);
-      publish({ syncNote: described.operator, error: described.developer }, gen);
+      publish(sheetWindow(describeApiFailure(err.message)), gen);
     }
   }
   return config;
@@ -2254,9 +2259,9 @@ function registerIpc() {
       if (publishOffline(err?.message)) return { ok: false };
       const message = err?.message || "The sheet is not available.";
       console.error(message);
-      const described = describeApiFailure(message);
-      publish({ syncNote: described.operator, error: described.developer });
-      return { ok: false, error: described.developer || described.operator };
+      const shown = sheetWindow(describeApiFailure(message));
+      publish(shown);
+      return { ok: false, error: shown.error };
     }
   });
   ipcMain.handle("undoAttendance", async (_event, input) => {

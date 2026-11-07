@@ -668,6 +668,9 @@ test("a Google error becomes one sentence and one developer line", () => {
   assert.equal(explainApiFailure(raw), shown.operator);
   assert.equal(translate(shown.operator, "ar"), "لم يُكتب سجل الوقت.");
   assert.match(translate(shown.developer, "ar"), /إضافة سجل الوقت فشلت/);
+  const setup = describeApiFailure("Missing service account JSON path. Set GOOGLE_SERVICE_ACCOUNT_JSON or serviceAccountJson in attendance.config.json.");
+  assert.match(setup.operator, /Missing service account JSON path/);
+  assert.equal(setup.developer, "");
   const read = describeApiFailure("Google API GET https://sheets.googleapis.com/v4/spreadsheets/attendance-test/values/'Info'!A%3AZZ failed (403): The caller does not have permission", "editor@example.iam.gserviceaccount.com");
   assert.match(read.operator, /Share as Editor with editor@example/);
   assert.equal(read.developer, "Roster read failed (403): permission denied.");
