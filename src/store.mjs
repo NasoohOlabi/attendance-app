@@ -813,6 +813,13 @@ function queuedPerson(person, kind) {
   };
 }
 
+/** A finger match and a mark without a finger share this. Someone already حاضر keeps the arrival time. */
+export function queueManualPresent(items, people, person, active = null) {
+  const day = outboxDay(person?.at);
+  if (attendanceListed(overlayPresent(people, items, day), person)) return items || [];
+  return queuePresent(items, person, active);
+}
+
 /** One present mark per student per day. A waiting undo for that day is dropped. */
 export function queuePresent(items, person, active = null) {
   const list = items || [];

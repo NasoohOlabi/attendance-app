@@ -60,6 +60,15 @@
           </svg>
           <span id="place-label" class="place-label" data-i18n="One moment">One moment</span>
         </div>
+        <button id="mark-manual" class="secondary" type="button" data-i18n="Mark without a finger">Mark without a finger</button>
+        <div id="manual-pick" hidden>
+          <label>
+            <span data-i18n="Search students">Search students</span>
+            <input id="manual-search" type="search" data-i18n-placeholder="Type a name" placeholder="Type a name" autocomplete="off" />
+          </label>
+          <p id="manual-empty" class="detail" hidden></p>
+          <ul id="manual-list"></ul>
+        </div>
         <img id="finger-ready" class="finger" data-i18n-alt="Scanned finger" alt="Scanned finger" hidden />
         <div id="prints-ready" class="prints" hidden></div>
         <div id="enroll-actions" class="actions" hidden>
@@ -245,6 +254,7 @@
       <div class="confirm-card" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-detail">
         <h2 id="confirm-title"></h2>
         <p id="confirm-who"><span id="confirm-name" dir="auto"></span></p>
+        <p id="confirm-id" dir="ltr" hidden></p>
         <p id="confirm-detail" class="detail"></p>
         <div class="actions">
           <button id="confirm-cancel" class="secondary" type="button" data-i18n="Cancel">Cancel</button>

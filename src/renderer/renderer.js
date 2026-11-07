@@ -46,7 +46,13 @@ const confirm = document.querySelector("#confirm");
 const confirmTitle = document.querySelector("#confirm-title");
 const confirmWho = document.querySelector("#confirm-who");
 const confirmName = document.querySelector("#confirm-name");
+const confirmId = document.querySelector("#confirm-id");
 const confirmDetail = document.querySelector("#confirm-detail");
+const markManual = document.querySelector("#mark-manual");
+const manualPick = document.querySelector("#manual-pick");
+const manualSearch = document.querySelector("#manual-search");
+const manualEmpty = document.querySelector("#manual-empty");
+const manualList = document.querySelector("#manual-list");
 const confirmCancel = document.querySelector("#confirm-cancel");
 const confirmOk = document.querySelector("#confirm-ok");
 const syncStudents = document.querySelector("#sync-students");
@@ -66,6 +72,7 @@ let confirmRequest = null;
 let dashboardOpen = false;
 let printsSeen = false;
 let printsGen = 0;
+let manualGen = 0;
 let deletingPrints = false;
 
 function renderUpdate(updateState) {
@@ -223,7 +230,15 @@ function paintPendingGallery(images, singleUrl, locked) {
   if (rescan) rescan.disabled = locked;
 }
 
+function closeManualPick() {
+  manualPick.hidden = true;
+  manualSearch.value = "";
+  manualList.replaceChildren();
+  manualEmpty.hidden = true;
+}
+
 function show(name) {
+  if (name !== "ready") closeManualPick();
   ready.hidden = dashboardOpen || name !== "ready";
   pending.hidden = name !== "pending";
   config.hidden = name !== "config";
@@ -488,8 +503,12 @@ function paintConfirm() {
   confirmTitle.textContent = translate(confirmRequest.title);
   confirmWho.hidden = !confirmRequest.name;
   confirmName.textContent = confirmRequest.name || "";
-  confirmDetail.textContent = translate(confirmRequest.detail);
+  confirmId.hidden = !confirmRequest.id;
+  confirmId.textContent = confirmRequest.id || "";
+  confirmDetail.hidden = !confirmRequest.detail;
+  confirmDetail.textContent = translate(confirmRequest.detail || "");
   confirmOk.textContent = translate(confirmRequest.confirmLabel);
+  confirmOk.className = confirmRequest.tone === "primary" ? "primary" : "danger";
 }
 
 function askConfirm(request) {
@@ -969,6 +988,70 @@ function chooseLang(lang) {
   if (!printsPage.hidden) refreshPrints();
   if (lastState) render(lastState);
 }
+
+function renderManualList(students) {
+  manualList.replaceChildren();
+  for (const student of students) {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    const name = document.createElement("span");
+    name.dir = "auto";
+    name.textContent = student.studentName || student.studentId || translate("Student");
+    const sub = document.createElement("span");
+    sub.className = "sub";
+    sub.dir = "ltr";
+    sub.textContent = student.studentId && student.studentId !== student.studentName ? student.studentId : "";
+    button.append(name, sub);
+    button.addEventListener("click", () => confirmManual(student));
+    item.append(button);
+    manualList.append(item);
+  }
+}
+
+async function refreshManual() {
+  const gen = ++manualGen;
+  const result = await window.attendance.filter(manualSearch.value);
+  if (gen !== manualGen || manualPick.hidden) return;
+  const students = Array.isArray(result) ? result : result?.students || [];
+  const problem = Array.isArray(result) ? "" : result?.error || "";
+  manualEmpty.hidden = students.length !== 0 && !problem;
+  manualEmpty.textContent = translate(problem || "No matching students");
+  renderManualList(problem ? [] : students);
+}
+
+async function confirmManual(student) {
+  const accepted = await askConfirm({
+    title: "Mark without a finger?",
+    name: student.studentName || "",
+    id: student.studentId || "",
+    detail: "",
+    confirmLabel: "Mark present",
+    tone: "primary",
+  });
+  if (!accepted) return;
+  closeManualPick();
+  const result = await window.attendance.markPresent({
+    studentId: student.studentId,
+    studentName: student.studentName,
+    rowNumber: student.rowNumber,
+  });
+  if (!result?.ok && result?.error) {
+    error.hidden = false;
+    error.textContent = translate(result.error);
+  }
+}
+
+markManual.addEventListener("click", () => {
+  manualPick.hidden = !manualPick.hidden;
+  if (manualPick.hidden) {
+    closeManualPick();
+    return;
+  }
+  manualSearch.focus();
+  refreshManual();
+});
+manualSearch.addEventListener("input", () => refreshManual());
 
 for (const button of document.querySelectorAll("[data-lang]")) {
   button.addEventListener("click", () => chooseLang(button.dataset.lang));
