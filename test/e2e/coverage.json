@@ -2,6 +2,7 @@
     "Bouty picker and scan card use website student information",
     "an unreachable fingerprint delete removes the local print and clears the sheet row when the network returns",
     "a hung fake capture respects both timeout windows before the host stops it",
+    "a mark without a finger uses the roster and does not start the scanner",
     "a protected attendance cell reports the failure and retains the queued mark",
     "a roster student without an id can match locally but cannot be marked present",
     "a saved pending print is offered for assignment after restart",
