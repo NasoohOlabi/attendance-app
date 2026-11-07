@@ -8,7 +8,7 @@ import { legacyUserDataPath, LEGACY_USER_DATA_DIR, loadConfig, requireGoogleConf
 import { appendAppLog, appLogFile, appLogLine } from "../src/log.mjs";
 import { updaterChannel, updaterErrorDetails, updaterInfoDetails, updaterShouldOffer } from "../src/update.mjs";
 import { attendanceTrend } from "../src/trend.mjs";
-import { attendanceCellUpdate, createGoogle, explainApiFailure, isOfflineError, sheetOfflineNote } from "../src/google.mjs";
+import { attendanceCellUpdate, createGoogle, describeApiFailure, explainApiFailure, isOfflineError, sheetOfflineNote } from "../src/google.mjs";
 import { translate } from "../src/renderer/i18n.js";
 import { fingerCue, presentTrace, screenForPhase } from "../src/renderer/view.js";
 import { appendScanTrace, beginScanAttempt, captureKillDelay, formatCommand, identifyArgs, interpretIdentify, interpretScan, mergeCapturedFiles, nextCapture, planScanRetry, scanArgs, SCAN_OUTAGE_MESSAGE, SCAN_RETRY_PAUSE_MS } from "../src/scan.mjs";
@@ -655,6 +655,25 @@ test("local index roundtrip keeps the template file", async () => {
   assert.equal(loaded.students.p1.studentName, "Nasoum");
   assert.equal(loaded.students.p1.templateFile, "s-p1.txt");
   await rm(dir, { recursive: true, force: true });
+});
+
+test("a Google error becomes one sentence and one developer line", () => {
+  const raw = "Google API POST https://sheets.googleapis.com/v4/spreadsheets/pages-test/values/'AttendanceLog'!A%3AZ:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS failed (403): {\"error\":\"log unavailable\"}";
+  const shown = describeApiFailure(raw);
+  assert.equal(shown.operator, "The time log was not written.");
+  assert.equal(shown.developer, "Time log append failed (403): log unavailable.");
+  assert.equal(shown.operator === shown.developer, false);
+  assert.equal(`${shown.operator} ${shown.developer}`.includes("https://"), false);
+  assert.equal(`${shown.operator} ${shown.developer}`.includes("spreadsheets"), false);
+  assert.equal(explainApiFailure(raw), shown.operator);
+  assert.equal(translate(shown.operator, "ar"), "لم يُكتب سجل الوقت.");
+  assert.match(translate(shown.developer, "ar"), /إضافة سجل الوقت فشلت/);
+  const setup = describeApiFailure("Missing service account JSON path. Set GOOGLE_SERVICE_ACCOUNT_JSON or serviceAccountJson in attendance.config.json.");
+  assert.match(setup.operator, /Missing service account JSON path/);
+  assert.equal(setup.developer, "");
+  const read = describeApiFailure("Google API GET https://sheets.googleapis.com/v4/spreadsheets/attendance-test/values/'Info'!A%3AZZ failed (403): The caller does not have permission", "editor@example.iam.gserviceaccount.com");
+  assert.match(read.operator, /Share as Editor with editor@example/);
+  assert.equal(read.developer, "Roster read failed (403): permission denied.");
 });
 
 test("a sheet permission error asks to share as Editor", () => {
