@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures/app.mjs";
-import { readFile, rm } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const id1 = "00 00 000 001";
@@ -131,6 +131,86 @@ test("cancel confirmation drops pending scans and keeps prints already enrolled"
   expect(await app.files()).toEqual(priorFiles);
   expect((await app.index()).pending).toBeNull();
   expect(app.sheets.grid("FingerPrints").rows).toHaveLength(1);
+});
+
+test("deleting one student clears that student's sheet rows before local files", async ({ app }) => {
+  await app.ready();
+  await app.seedPrint(id1, "أحمد طالب");
+  await app.seedPrint(id2, "أحمد طالب");
+  await writeFile(path.join(app.prints, "templates", "s-00-00-000-001--2.txt"), "second-print");
+  app.sheets.grid("FingerPrints").rows.push(
+    [id1, "synthetic-print", "12/10/2026 16:55:03"],
+    [id1, "second-print", "12/10/2026 16:56:03"],
+    [id2, "other-print", "12/10/2026 16:57:03"],
+  );
+  const beforeAttendance = structuredClone(app.sheets.grid("Info").rows);
+  const beforeLog = structuredClone(app.sheets.grid("AttendanceLog").rows);
+
+  await app.page.locator("#prints-nav").click();
+  await expect(app.page.locator("#prints")).toBeVisible();
+  await expect(app.page.locator("#prints-nav")).toHaveAttribute("aria-current", "page");
+  await expect(app.page.locator("#attendance")).toHaveAttribute("aria-current", "false");
+  const layout = await app.page.evaluate(() => {
+    const root = document.documentElement;
+    const page = document.querySelector("#prints");
+    return {
+      pageFits: root.scrollHeight <= root.clientHeight + 1,
+      width: page.getBoundingClientRect().width,
+    };
+  });
+  expect(layout.pageFits).toBe(true);
+  expect(layout.width).toBeLessThanOrEqual(760);
+
+  await expect(app.page.locator("#prints-list li")).toHaveCount(2);
+  await app.page.locator("#prints-search").fill("000 002");
+  await expect(app.page.locator("#prints-list li")).toHaveCount(1);
+  await app.page.locator("#prints-search").fill("");
+  await expect(app.page.locator("#prints-list li")).toHaveCount(2);
+
+  const row = app.page.locator("#prints-list li").filter({ hasText: id1 });
+  await expect(row).toContainText("2 prints");
+  await row.locator("button").click();
+  await expect(app.page.locator("#confirm")).toBeVisible();
+  await app.page.locator("#confirm-cancel").click();
+  expect(await app.files()).toEqual(expect.arrayContaining(["s-00-00-000-001.txt", "s-00-00-000-001--2.txt"]));
+
+  await row.locator("button").click();
+  await app.page.locator("#confirm-ok").click();
+  await expect.poll(async () => app.files()).not.toContain("s-00-00-000-001.txt");
+  expect(await app.files()).not.toContain("s-00-00-000-001--2.txt");
+  expect(await app.files()).toContain("s-00-00-000-002.txt");
+  const left = app.sheets.grid("FingerPrints").rows;
+  expect(left.some((line) => line[0] === id1)).toBe(false);
+  expect(left.some((line) => line[0] === id2)).toBe(true);
+  expect(left[0][0]).toBe("student_id");
+  expect(app.sheets.grid("Info").rows).toEqual(beforeAttendance);
+  expect(app.sheets.grid("AttendanceLog").rows).toEqual(beforeLog);
+  expect((await app.index()).students[id1].templateFile).toBe("");
+
+  await app.page.locator("#settings").click();
+  await app.page.locator("#lang-ar").click();
+  await expect(app.page.locator("html")).toHaveAttribute("dir", "rtl");
+  await app.page.locator("#prints-nav").click();
+  await expect(app.page.locator("#prints h1")).toHaveText("البصمات");
+  await expect(app.page.locator("#prints-nav")).toHaveAttribute("aria-current", "page");
+});
+
+test("a failed fingerprint delete keeps that student's local prints", async ({ app }) => {
+  await app.ready();
+  await app.seedPrint(id1, "أحمد طالب");
+  app.sheets.grid("FingerPrints").rows.push([id1, "synthetic-print", "12/10/2026 16:55:03"]);
+  await app.page.locator("#prints-nav").click();
+  await expect(app.page.locator("#prints-list li").filter({ hasText: id1 })).toBeVisible();
+  app.sheets.failNextWith(
+    new Error("offline"),
+    (request) => request.url.includes(":batchUpdate") && JSON.stringify(request.data || {}).includes("deleteDimension"),
+  );
+  await app.page.locator("#prints-list li").filter({ hasText: id1 }).locator("button").click();
+  await app.page.locator("#confirm-ok").click();
+  await expect(app.page.locator("#error")).toContainText("Prints on this computer were kept");
+  expect(await app.files()).toContain("s-00-00-000-001.txt");
+  expect(app.sheets.grid("FingerPrints").rows.some((line) => line[0] === id1)).toBe(true);
+  expect(app.sheets.grid("Info").rows[2][2]).not.toBe("حاضر");
 });
 
 test("fingerprint sheet append failure keeps the assigned local print", async ({ app }) => {

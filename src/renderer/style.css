@@ -198,7 +198,8 @@ button.header-title {
 .app > header button.header-title:hover { background: color-mix(in srgb, var(--ink) 5%, var(--card)); }
 .app:has(#dashboard-view:not([hidden])) #dashboard,
 .app:has(#config:not([hidden])) #settings,
-.app:not(:has(#dashboard-view:not([hidden]))):not(:has(#config:not([hidden]))):has(#ready:not([hidden])) #attendance {
+.app:has(#prints:not([hidden])) #prints-nav,
+.app:not(:has(#dashboard-view:not([hidden]))):not(:has(#config:not([hidden]))):not(:has(#prints:not([hidden]))):has(#ready:not([hidden])) #attendance {
   background: var(--card);
   box-shadow: inset 0 0 0 1px var(--line);
   color: var(--green-dark);
@@ -727,7 +728,7 @@ button.header-title {
   margin: 0;
   color: var(--danger);
 }
-#pending, #config {
+#pending, #config, #prints {
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -751,7 +752,8 @@ button.header-title {
 #config > .actions { flex: none; }
 #config .hero { flex: none; }
 #config .hero h1 { font-size: 28px; }
-#pending .hero { flex: none; }
+#pending .hero, #prints .hero { flex: none; }
+#prints > label { display: block; flex: none; }
 #config input[type="text"],
 #config .primary,
 #config .secondary,
@@ -773,7 +775,7 @@ input[type="text"], input[type="search"], input[type="password"], select, textar
   margin: 0;
   border-inline-start: 3px solid var(--green);
 }
-#list {
+#list, #prints-list {
   list-style: none;
   margin: 0;
   padding: 4px 14px;
@@ -789,7 +791,15 @@ input[type="text"], input[type="search"], input[type="password"], select, textar
   scrollbar-color: #c9bfb4 transparent;
   scrollbar-gutter: stable;
 }
-#list li + li { border-top: 1px solid var(--line); }
+#list li + li, #prints-list li + li { border-top: 1px solid var(--line); }
+#prints-list .print-person {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+}
+#prints-list .print-person > span:first-child { flex: 1; min-width: 0; }
+#prints-list .danger { flex: none; padding: 8px 12px; }
 #list button {
   width: 100%;
   text-align: start;
@@ -809,8 +819,8 @@ input[type="text"], input[type="search"], input[type="password"], select, textar
   text-decoration-color: var(--muted);
 }
 #list button:disabled { opacity: 0.6; cursor: default; }
-#list .sub { color: var(--muted); font-size: 13px; }
-#empty { margin: 0; color: var(--muted); flex: none; }
+#list .sub, #prints-list .sub { color: var(--muted); font-size: 13px; }
+#empty, #prints-empty { margin: 0; color: var(--muted); flex: none; }
 .actions { display: flex; gap: 8px; }
 .primary, .secondary {
   border-radius: 12px;
@@ -928,7 +938,8 @@ input[type="text"], input[type="search"], input[type="password"], select, textar
   margin-top: 0;
 }
 .app:has(#config:not([hidden])) footer,
-.app:has(#pending:not([hidden])) footer {
+.app:has(#pending:not([hidden])) footer,
+.app:has(#prints:not([hidden])) footer {
   width: min(760px, 100%);
   align-self: center;
 }

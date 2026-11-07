@@ -1,5 +1,6 @@
 [
     "Bouty picker and scan card use website student information",
+    "a failed fingerprint delete keeps that student's local prints",
     "a hung fake capture respects both timeout windows before the host stops it",
     "a protected attendance cell reports the failure and retains the queued mark",
     "a roster student without an id can match locally but cannot be marked present",
@@ -15,6 +16,7 @@
     "cancel confirmation drops pending scans and keeps prints already enrolled",
     "cancelled and invalid imports preserve the encrypted account",
     "clock edits report the missing log configuration without appending",
+    "deleting one student clears that student's sheet rows before local files",
     "Done saves three kept scans as separate files and sheet rows",
     "each Arabic font is selectable and the latest choice survives restart",
     "fingerprint deletion confirmation can be canceled three ways without a sheet write",

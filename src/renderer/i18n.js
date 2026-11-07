@@ -90,6 +90,17 @@ const AR = {
   "Delete all fingerprints": "احذف كل البصمات",
   "Sync student list": "مزامنة قائمة الطلاب",
   Dashboard: "Dashboard",
+  Fingerprints: "البصمات",
+  "Remove one student's prints from this computer and the fingerprints sheet.":
+    "أزل بصمات طالب واحد من هذا الجهاز ومن ورقة البصمات.",
+  "No fingerprints stored": "لا بصمات محفوظة",
+  Delete: "حذف",
+  "Delete this student's fingerprints?": "حذف بصمات هذا الطالب؟",
+  "This student's prints are removed from this computer and the fingerprints sheet. Attendance is not changed.":
+    "تُحذف بصمات هذا الطالب من هذا الجهاز ومن ورقة البصمات. كشف الحضور لا يتغير.",
+  "Prints deleted.": "حُذفت البصمات.",
+  "The fingerprint sheet was not cleared. Prints on this computer were kept.":
+    "لم تُمسح ورقة البصمات. بقيت البصمات على هذا الجهاز.",
   "Check for updates": "\u062a\u062d\u0642\u0642 \u0645\u0646 \u0627\u0644\u062a\u062d\u062f\u064a\u062b\u0627\u062a",
   "Update track": "مسار التحديث",
   Stable: "مستقر",

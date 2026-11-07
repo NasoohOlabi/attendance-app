@@ -1,5 +1,6 @@
 export function screenForPhase(phase) {
   if (phase === "config") return "config";
+  if (phase === "prints") return "prints";
   if (phase === "pending" || phase === "linking") return "pending";
   return "ready";
 }

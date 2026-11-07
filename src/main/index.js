@@ -70,6 +70,10 @@ import {
   sheetProblem,
   studentKey,
   planBatchFiles,
+  planStudentPrintDelete,
+  localFilesAfterSheetDelete,
+  dropPrintEnrollment,
+  studentsWithPrints,
   studentTemplateNames,
   templateFileForStudent,
   templatePath,
@@ -1720,6 +1724,81 @@ async function createWindow() {
   win.webContents.send("state", state);
 }
 
+const PRINTS_KEPT = "The fingerprint sheet was not cleared. Prints on this computer were kept.";
+
+async function printRoster(config) {
+  const index = await loadIndex(config.fingerprintDir);
+  const names = await listTemplateNames(config);
+  let rows = [];
+  if (client && !sheetDenied && config.logSpreadsheetId) {
+    try {
+      rows = (await getSheetGrid(client, config.logSpreadsheetId, config.fingerprintSheetGid)).rows;
+    } catch (err) {
+      console.error(err.message);
+    }
+  }
+  return { students: studentsWithPrints(index.students, names, rows) };
+}
+
+/** Sheet rows for this student go first. Local files stay if that delete throws. */
+async function deleteStudentPrints(key) {
+  if (!currentConfig?.fingerprintDir) throw new Error("The app is still starting.");
+  const config = currentConfig;
+  const student = (await printRoster(config)).students.find((item) => item.key === String(key || ""));
+  if (!student) throw new Error("Choose a student from the list.");
+  const id = canonicalStudentId(student.studentId);
+  let sheetRows = [];
+  if (id) {
+    if (!client || sheetDenied || !config.logSpreadsheetId) throw new Error("The fingerprint sheet is not available.");
+    try {
+      sheetRows = (await getSheetGrid(client, config.logSpreadsheetId, config.fingerprintSheetGid)).rows;
+    } catch (err) {
+      console.error(err);
+      throw new Error(PRINTS_KEPT);
+    }
+  }
+  const plan = planStudentPrintDelete(student, sheetRows, await listTemplateNames(config));
+  if (plan.sheetRows.length) {
+    try {
+      await deleteSheetRows(client, config.logSpreadsheetId, config.fingerprintSheetGid, plan.sheetRows);
+    } catch (err) {
+      console.error(err);
+      throw new Error(PRINTS_KEPT);
+    }
+  }
+  printsEpoch += 1;
+  const files = localFilesAfterSheetDelete(plan, true);
+  for (const file of files) await rm(templatePath(config.fingerprintDir, file), { force: true });
+  const index = await loadIndex(config.fingerprintDir);
+  await saveIndex(config.fingerprintDir, dropPrintEnrollment(index, student, files));
+  for (const cachedStudent of Object.values(cached)) {
+    const sameId = id && canonicalStudentId(cachedStudent.studentId) === id;
+    const sameName =
+      !id &&
+      !String(student.key || "").startsWith("file:") &&
+      !canonicalStudentId(cachedStudent.studentId) &&
+      student.studentName &&
+      String(cachedStudent.studentName || "").trim().toLowerCase() === student.studentName.trim().toLowerCase();
+    const pointed = files.some((file) => file.toLowerCase() === String(cachedStudent.templateFile || "").toLowerCase());
+    if (sameId || sameName || pointed) {
+      cachedStudent.templateFile = "";
+      cachedStudent.capturedAt = "";
+    }
+  }
+  publish({
+    phase: "prints",
+    headline: "Fingerprints",
+    detail: "Prints deleted.",
+    error: "",
+    canCloseSettings: true,
+  });
+}
+
+function rememberScreen() {
+  if (state.phase === "config" || state.phase === "prints" || state.phase === "linking") return;
+  savedScreen = { phase: state.phase, headline: state.headline, detail: state.detail };
+}
+
 function registerIpc() {
   ipcMain.handle("saveBouty", async (_event, input) => {
     try {
@@ -1841,7 +1920,7 @@ function registerIpc() {
   });
   ipcMain.handle("openSettings", () => {
     if (state.phase === "linking") return;
-    savedScreen = { phase: state.phase, headline: state.headline, detail: state.detail };
+    rememberScreen();
     pause = true;
     publish({
       phase: "config",
@@ -1866,11 +1945,67 @@ function registerIpc() {
     }
     const next = savedScreen || { phase: "ready", headline: "Place a finger", detail: "Listening" };
     publish({
-      phase: next.phase === "config" || next.phase === "linking" ? "ready" : next.phase,
+      phase: next.phase === "config" || next.phase === "prints" || next.phase === "linking" ? "ready" : next.phase,
       headline: next.headline || "Place a finger",
       detail: next.detail || "Listening",
       error: "",
     });
+  });
+  ipcMain.handle("openPrints", () => {
+    if (state.phase === "linking") return;
+    rememberScreen();
+    pause = true;
+    publish({
+      phase: "prints",
+      headline: "Fingerprints",
+      detail: "Remove one student's prints from this computer and the fingerprints sheet.",
+      error: "",
+      canCloseSettings: true,
+    });
+  });
+  ipcMain.handle("closePrints", () => {
+    if (!currentConfig) return;
+    pause = false;
+    if (pending) {
+      publish({
+        phase: "pending",
+        headline: "New fingerprint",
+        detail: collecting ? chooseDetail(batch.length) : "Choose who this print belongs to.",
+        error: "",
+        enroll: enrollView(),
+      });
+      return;
+    }
+    const next = savedScreen || { phase: "ready", headline: "Place a finger", detail: "Listening" };
+    publish({
+      phase: next.phase === "config" || next.phase === "prints" || next.phase === "linking" ? "ready" : next.phase,
+      headline: next.headline || "Place a finger",
+      detail: next.detail || "Listening",
+      error: "",
+    });
+  });
+  ipcMain.handle("listPrints", async (_event, query) => {
+    if (!currentConfig?.fingerprintDir) return [];
+    try {
+      const roster = await printRoster(currentConfig);
+      return fuzzyStudents(roster.students, query).map((student) => ({
+        key: student.key,
+        studentId: student.studentId,
+        studentName: student.studentName,
+        count: student.count,
+      }));
+    } catch (err) {
+      console.error(err.message);
+      return [];
+    }
+  });
+  ipcMain.handle("deleteStudentPrints", async (_event, key) => {
+    try {
+      await exclusive(() => deleteStudentPrints(key));
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
   });
   ipcMain.handle("importServiceAccount", async (event) => {
     if (!win || event.sender !== win.webContents) return { ok: false, error: "Open Settings to import the account." };

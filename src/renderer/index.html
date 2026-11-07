@@ -31,6 +31,10 @@
             <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0 2 5.3M20 4v7h-7"/></svg>
             <span data-i18n="Check for updates">Check for updates</span>
           </button>
+          <button id="prints-nav" class="ghost nav-link" type="button">
+            <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 11.2a1.8 1.8 0 0 0-1.8 1.8c0 1.4.4 2.4.8 3.8"/><path d="M12 8a5 5 0 0 0-5 5c0 1.7.4 2.9.9 4.4"/><path d="M12 5.2a7.8 7.8 0 0 0-7.8 7.8c0 1.4.2 2.5.5 3.6"/><path d="M14.2 13.2c.2 1.5.5 2.4.8 3.6"/><path d="M16.4 9.4A5 5 0 0 1 17 13c0 1.2-.2 2.2-.5 3.3"/><path d="M18.6 8.2A7.8 7.8 0 0 1 19.8 13c0 1-.1 1.9-.3 2.8"/></svg>
+            <span data-i18n="Fingerprints">Fingerprints</span>
+          </button>
           <button id="settings" class="ghost nav-link" type="button">
             <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9.7 3.8.4-1.3h3.8l.4 1.3 1.5.6 1.2-.7 2.7 2.7-.7 1.2.6 1.5 1.3.4v3.8l-1.3.4-.6 1.5.7 1.2-2.7 2.7-1.2-.7-1.5.6-.4 1.3h-3.8l-.4-1.3-1.5-.6-1.2.7-2.7-2.7.7-1.2-.6-1.5-1.3-.4V9.5l1.3-.4.6-1.5-.7-1.2 2.7-2.7 1.2.7 1.5-.6ZM12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/></svg>
             <span data-i18n="Settings">Settings</span>
@@ -114,6 +118,18 @@
         </label>
         <p id="empty" data-i18n="No matching students" hidden>No matching students</p>
         <ul id="list"></ul>
+      </section>
+      <section id="prints" hidden>
+        <div class="hero">
+          <h1 data-i18n="Fingerprints">Fingerprints</h1>
+          <p class="detail" id="prints-detail" data-i18n="Remove one student's prints from this computer and the fingerprints sheet.">Remove one student's prints from this computer and the fingerprints sheet.</p>
+        </div>
+        <label>
+          <span data-i18n="Search students">Search students</span>
+          <input id="prints-search" type="search" data-i18n-placeholder="Type a name" placeholder="Type a name" autocomplete="off" />
+        </label>
+        <p id="prints-empty" data-i18n="No fingerprints stored" hidden>No fingerprints stored</p>
+        <ul id="prints-list"></ul>
       </section>
       <section id="config" hidden>
         <div class="hero">

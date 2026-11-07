@@ -29,6 +29,11 @@ const empty = document.querySelector("#empty");
 const error = document.querySelector("#error");
 const sync = document.querySelector("#sync");
 const settings = document.querySelector("#settings");
+const printsPage = document.querySelector("#prints");
+const printsNav = document.querySelector("#prints-nav");
+const printsSearch = document.querySelector("#prints-search");
+const printsList = document.querySelector("#prints-list");
+const printsEmpty = document.querySelector("#prints-empty");
 const attendance = document.querySelector("#attendance");
 const update = document.querySelector("#update");
 const updateDialog = document.querySelector("#update-dialog");
@@ -59,6 +64,9 @@ let listLoading = false;
 let lastState = null;
 let confirmRequest = null;
 let dashboardOpen = false;
+let printsSeen = false;
+let printsGen = 0;
+let deletingPrints = false;
 
 function renderUpdate(updateState) {
   const info = updateState || {};
@@ -219,14 +227,16 @@ function show(name) {
   ready.hidden = dashboardOpen || name !== "ready";
   pending.hidden = name !== "pending";
   config.hidden = name !== "config";
+  printsPage.hidden = name !== "prints";
   settings.hidden = linking;
   dashboard.hidden = name !== "ready";
   dashboardView.hidden = !dashboardOpen;
   ready.classList.toggle("ready", name === "ready");
-  const current = dashboardOpen ? "dashboard" : name === "config" ? "settings" : name === "ready" ? "attendance" : "";
+  const current = dashboardOpen ? "dashboard" : name === "config" ? "settings" : name === "prints" ? "prints" : name === "ready" ? "attendance" : "";
   attendance.setAttribute("aria-current", current === "attendance" ? "page" : "false");
   dashboard.setAttribute("aria-current", current === "dashboard" ? "page" : "false");
   settings.setAttribute("aria-current", current === "settings" ? "page" : "false");
+  printsNav.setAttribute("aria-current", current === "prints" ? "page" : "false");
 }
 
 function renderList(students) {
@@ -561,6 +571,8 @@ function render(state) {
   const enteredConfig = mode === "config" && !configOpen;
   picker = mode === "pending";
   configOpen = mode === "config";
+  const enteredPrints = mode === "prints" && !printsSeen;
+  printsSeen = mode === "prints";
   linking = state.phase === "linking";
   show(mode);
   renderToday(state.present);
@@ -628,13 +640,21 @@ function render(state) {
     cancel.hidden = !state.canCloseSettings;
     if (enteredConfig) fillConfig(state);
   }
+  if (mode === "prints") {
+    document.querySelector("#prints-detail").textContent = translate(state.detail || "Remove one student's prints from this computer and the fingerprints sheet.");
+    if (enteredPrints) {
+      printsSearch.value = "";
+      refreshPrints();
+    }
+  }
   error.hidden = !state.error;
   error.textContent = translate(state.error || "");
   sync.textContent = [state.syncNote, state.bouty?.message].filter(Boolean).map(translate).join(" · ");
 }
 
-dashboard.addEventListener("click", () => {
+dashboard.addEventListener("click", async () => {
   dashboardOpen = true;
+  if (!printsPage.hidden) await window.attendance.closePrints();
   show("ready");
 });
 dashboardClose.addEventListener("click", () => {
@@ -643,13 +663,24 @@ dashboardClose.addEventListener("click", () => {
 });
 attendance.addEventListener("click", () => {
   const settingsOpen = !config.hidden;
+  const printsOpen = !printsPage.hidden;
   dashboardOpen = false;
   if (settingsOpen) {
     show("config");
     window.attendance.closeSettings();
     return;
   }
+  if (printsOpen) {
+    show("prints");
+    window.attendance.closePrints();
+    return;
+  }
   show(screenForPhase(lastState?.phase));
+});
+printsNav.addEventListener("click", () => {
+  if (!printsPage.hidden) return;
+  dashboardOpen = false;
+  window.attendance.openPrints();
 });
 
 let searchTimer;
@@ -713,6 +744,79 @@ settings.addEventListener("click", () => {
   if (!config.hidden) return;
   dashboardOpen = false;
   window.attendance.openSettings();
+});
+
+function renderPrints(students) {
+  printsList.replaceChildren();
+  const query = printsSearch.value.trim();
+  printsEmpty.hidden = students.length !== 0;
+  printsEmpty.textContent = translate(query ? "No matching students" : "No fingerprints stored");
+  for (const student of students) {
+    const item = document.createElement("li");
+    const person = document.createElement("div");
+    person.className = "print-person";
+    const name = document.createElement("span");
+    name.dir = "auto";
+    name.textContent = student.studentName || student.studentId || translate("Student");
+    const sub = document.createElement("span");
+    sub.className = "sub";
+    const bits = [];
+    if (student.studentId && student.studentId !== student.studentName) bits.push(student.studentId);
+    const count = Number(student.count) || 0;
+    if (count > 0) bits.push(translate(count === 1 ? "1 print" : `${count} prints`));
+    sub.textContent = bits.join(" · ");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "danger";
+    button.disabled = deletingPrints;
+    button.textContent = translate("Delete");
+    button.addEventListener("click", () => removePrints(student));
+    person.append(name, sub, button);
+    item.append(person);
+    printsList.append(item);
+  }
+}
+
+async function refreshPrints() {
+  if (typeof window.attendance.listPrints !== "function") return;
+  const gen = ++printsGen;
+  const students = await window.attendance.listPrints(printsSearch.value);
+  if (gen !== printsGen || printsPage.hidden) return;
+  renderPrints(Array.isArray(students) ? students : []);
+}
+
+async function removePrints(student) {
+  if (deletingPrints) return;
+  if (typeof window.attendance.deleteStudentPrints !== "function") {
+    error.hidden = false;
+    error.textContent = translate("Close the app and open it again, then delete the fingerprints.");
+    return;
+  }
+  const accepted = await askConfirm({
+    title: "Delete this student's fingerprints?",
+    name: student.studentName || student.studentId,
+    detail: "This student's prints are removed from this computer and the fingerprints sheet. Attendance is not changed.",
+    confirmLabel: "Delete fingerprints",
+  });
+  if (!accepted) return;
+  deletingPrints = true;
+  for (const button of printsList.querySelectorAll("button")) button.disabled = true;
+  try {
+    const result = await window.attendance.deleteStudentPrints(student.key);
+    if (!result?.ok && result?.error) {
+      error.hidden = false;
+      error.textContent = translate(result.error);
+    } else {
+      error.hidden = true;
+    }
+  } finally {
+    deletingPrints = false;
+    await refreshPrints();
+  }
+}
+
+printsSearch.addEventListener("input", () => {
+  refreshPrints();
 });
 update.addEventListener("click", async () => {
   update.disabled = true;
@@ -836,6 +940,7 @@ function chooseLang(lang) {
   setLang(lang);
   todayKey = "";
   paintConfirm();
+  if (!printsPage.hidden) refreshPrints();
   if (lastState) render(lastState);
 }
 

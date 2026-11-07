@@ -32,6 +32,10 @@ import {
   stampFromClock,
   nextSampleFile,
   planBatchFiles,
+  planStudentPrintDelete,
+  localFilesAfterSheetDelete,
+  dropPrintEnrollment,
+  studentsWithPrints,
   studentTemplateNames,
   pendingPath,
   studentByTemplateSid,
@@ -539,6 +543,77 @@ test("a second scan adds --2 and keeps the primary", () => {
   ]);
 });
 
+test("deleting a student removes that id's sheet rows and every local name", () => {
+  const rows = [
+    ["student_id", "fingerprint", "created_at"],
+    ["00 00 000 001", "a", "t"],
+    ["00 00 000 002", "b", "t"],
+    ["00 00 000 001", "c", "t"],
+  ];
+  const local = ["s-00-00-000-001.txt", "s-00-00-000-001--2.txt", "s-00-00-000-002.txt", "s-no-id.txt", "s-no-id--2.txt"];
+  const plan = planStudentPrintDelete({ studentId: "00 00 000 001", studentName: "أحد" }, rows, local);
+  assert.deepEqual(plan.sheetRows, [2, 4]);
+  assert.deepEqual([...plan.localFiles].sort(), ["s-00-00-000-001--2.txt", "s-00-00-000-001.txt"]);
+  const named = planStudentPrintDelete({ studentId: "", studentName: "No Id" }, rows, local);
+  assert.deepEqual(named.sheetRows, []);
+  assert.deepEqual([...named.localFiles].sort(), ["s-no-id--2.txt", "s-no-id.txt"]);
+  const listed = studentsWithPrints(
+    { a: { studentId: "00 00 000 001", studentName: "أحد", templateFile: "s-00-00-000-001.txt" } },
+    ["s-00-00-000-001.txt", "s-00-00-000-001--2.txt", "s-00-00-000-003.txt"],
+    rows,
+  );
+  const one = listed.find((student) => student.studentId === "00 00 000 001");
+  assert.equal(one.count, 2);
+  assert.deepEqual(one.sheetRows, [2, 4]);
+  const two = listed.find((student) => student.studentId === "00 00 000 002");
+  assert.equal(two.count, 1);
+  assert.deepEqual(two.localFiles, []);
+  assert.equal(listed.some((student) => student.localFiles.includes("s-00-00-000-003.txt")), true);
+});
+
+test("a failed sheet delete does not remove local fingerprint files", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "attendance-print-delete-"));
+  const student = {
+    key: "00 00 000 001",
+    studentId: "00 00 000 001",
+    studentName: "أحد",
+    templateFile: "s-00-00-000-001.txt",
+  };
+  const names = ["s-00-00-000-001.txt", "s-00-00-000-001--2.txt", "s-00-00-000-002.txt"];
+  const rows = [
+    ["student_id", "fingerprint", "created_at"],
+    ["00 00 000 001", "a", "t"],
+    ["00 00 000 002", "b", "t"],
+  ];
+  await loadIndex(dir);
+  await writeFile(templatePath(dir, "s-00-00-000-001.txt"), "one");
+  await writeFile(templatePath(dir, "s-00-00-000-001--2.txt"), "two");
+  await writeFile(templatePath(dir, "s-00-00-000-002.txt"), "other");
+  const plan = planStudentPrintDelete(student, rows, names);
+  const kept = localFilesAfterSheetDelete(plan, false);
+  assert.deepEqual(kept, []);
+  const index = {
+    students: {
+      "00 00 000 001": { studentId: "00 00 000 001", studentName: "أحد", templateFile: "s-00-00-000-001.txt", capturedAt: "t" },
+      "00 00 000 002": { studentId: "00 00 000 002", studentName: "سلمى", templateFile: "s-00-00-000-002.txt", capturedAt: "t" },
+    },
+    pending: null,
+  };
+  assert.equal(index.students["00 00 000 001"].templateFile, "s-00-00-000-001.txt");
+  assert.equal(await readFile(templatePath(dir, "s-00-00-000-001.txt"), "utf8"), "one");
+  assert.equal(await readFile(templatePath(dir, "s-00-00-000-001--2.txt"), "utf8"), "two");
+  const removed = localFilesAfterSheetDelete(plan, true);
+  for (const file of removed) await rm(templatePath(dir, file));
+  const dropped = dropPrintEnrollment(index, student, removed);
+  assert.equal(dropped.students["00 00 000 001"].templateFile, "");
+  assert.equal(dropped.students["00 00 000 001"].capturedAt, "");
+  assert.equal(dropped.students["00 00 000 002"].templateFile, "s-00-00-000-002.txt");
+  await assert.rejects(readFile(templatePath(dir, "s-00-00-000-001.txt")));
+  await assert.rejects(readFile(templatePath(dir, "s-00-00-000-001--2.txt")));
+  assert.equal(await readFile(templatePath(dir, "s-00-00-000-002.txt"), "utf8"), "other");
+  await rm(dir, { recursive: true, force: true });
+});
+
 test("decidePrint is known only when the matched template is linked", () => {
   const students = {
     "7": { studentId: "7", studentName: "Nasoum", templateFile: "s-7.txt" },
@@ -948,6 +1023,12 @@ test("arabic copy keeps student names and turns known chrome into Arabic", () =>
   assert.equal(translate("2 prints", "ar"), "بصمتان");
   assert.equal(translate("4 prints", "ar"), "4 بصمات");
   assert.equal(translate("add", "ar"), "إضافة");
+  assert.equal(translate("Fingerprints", "ar"), "البصمات");
+  assert.equal(translate("Delete", "ar"), "حذف");
+  assert.equal(
+    translate("The fingerprint sheet was not cleared. Prints on this computer were kept.", "ar"),
+    "لم تُمسح ورقة البصمات. بقيت البصمات على هذا الجهاز.",
+  );
   assert.match(translate("Linked اسم. Marked present.", "ar"), /اسم/);
   assert.equal(translate("not a known scanner line", "ar"), "not a known scanner line");
 });
@@ -957,6 +1038,7 @@ test("screenForPhase keeps listening, the picker, and setup apart", () => {
   assert.equal(screenForPhase("pending"), "pending");
   assert.equal(screenForPhase("linking"), "pending");
   assert.equal(screenForPhase("config"), "config");
+  assert.equal(screenForPhase("prints"), "prints");
   assert.equal(screenForPhase("starting"), "ready");
 });
 

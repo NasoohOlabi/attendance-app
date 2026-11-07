@@ -909,6 +909,165 @@ export function fingerprintFiles(rows) {
   });
 }
 
+function fingerprintTable(rows) {
+  const list = rows || [];
+  if (fingerprintHeaderMissing(list)) return null;
+  const first = list[0] || [];
+  const headerLike = first.some((cell) => {
+    const text = headerText(cell);
+    return isFingerprintIdHeader(text) || isFingerprintTemplateHeader(text) || isCreatedAtHeader(text);
+  });
+  const header = headerLike ? first : FINGERPRINT_HEADER;
+  return { list, layout: fingerprintLayout(header), start: headerLike ? 1 : 0 };
+}
+
+/** 1-based sheet rows whose fingerprint id is this student. The header row is never included. */
+export function fingerprintRowNumbers(rows, studentId) {
+  const id = canonicalStudentId(studentId);
+  const table = id ? fingerprintTable(rows) : null;
+  if (!table) return [];
+  const found = [];
+  for (let i = table.start; i < table.list.length; i += 1) {
+    if (i + 1 <= 1) continue;
+    if (canonicalStudentId((table.list[i] || [])[table.layout.id]) === id) found.push(i + 1);
+  }
+  return found;
+}
+
+/**
+ * Sheet rows and local template names for one student.
+ * Callers delete the sheet rows first. Local files stay until that delete succeeds.
+ */
+export function planStudentPrintDelete(student, sheetRows, localNames) {
+  const id = canonicalStudentId(student?.studentId);
+  const localFiles = studentTemplateNames(student, localNames);
+  const pointed = String(student?.templateFile || "");
+  if (
+    pointed &&
+    path.basename(pointed) === pointed &&
+    (localNames || []).some((name) => String(name).toLowerCase() === pointed.toLowerCase()) &&
+    !localFiles.some((name) => name.toLowerCase() === pointed.toLowerCase())
+  ) {
+    localFiles.push(pointed);
+  }
+  return {
+    studentId: id,
+    sheetRows: id ? fingerprintRowNumbers(sheetRows, id) : [],
+    localFiles,
+  };
+}
+
+/** A failed sheet delete removes nothing on disk. */
+export function localFilesAfterSheetDelete(plan, sheetDeleted) {
+  if (!sheetDeleted) return [];
+  return [...(plan?.localFiles || [])];
+}
+
+/** Clear this student's template pointer, and any pointer at a file that was just removed. */
+export function dropPrintEnrollment(index, student, files) {
+  const removed = new Set((files || []).map((file) => String(file).toLowerCase()));
+  const keys = new Set();
+  if (student?.key) keys.add(student.key);
+  if (!String(student?.key || "").startsWith("file:")) {
+    const key = studentKey(student);
+    if (key && key !== "name:") keys.add(key);
+  }
+  const students = {};
+  for (const [key, row] of Object.entries(index?.students || {})) {
+    const file = String(row?.templateFile || "").toLowerCase();
+    students[key] = keys.has(key) || (file && removed.has(file)) ? { ...row, templateFile: "", capturedAt: "" } : row;
+  }
+  return { students, pending: index?.pending || null };
+}
+
+function rosterTemplateName(name) {
+  const file = String(name || "");
+  return Boolean(file) && path.basename(file) === file && /^[st]-.+\.txt$/i.test(file) && file.toLowerCase() !== "pending.txt";
+}
+
+/** Students who have at least one local template or fingerprint-sheet row. */
+export function studentsWithPrints(indexStudents, localNames, sheetRows) {
+  const locals = (localNames || []).filter(rosterTemplateName);
+  const people = new Map();
+
+  const ensure = (student, primaryFile) => {
+    const id = canonicalStudentId(student?.studentId);
+    const name = String(student?.studentName || "").trim();
+    const primary = primaryFile || templateFileForStudent({ studentId: id, studentName: name });
+    const key = id ? studentKey({ studentId: id }) : primaryFile ? `file:${templateStem(primary)}` : studentKey({ studentName: name });
+    if (!key || key === "name:") return null;
+    let row = people.get(key);
+    if (!row) {
+      row = {
+        key,
+        studentId: id || "",
+        studentName: name,
+        primaryFile: primary,
+        templateFile: String(student?.templateFile || ""),
+        localFiles: [],
+        sheetRows: [],
+      };
+      people.set(key, row);
+    } else if (name && !row.studentName) {
+      row.studentName = name;
+    }
+    if (!row.templateFile && student?.templateFile) row.templateFile = String(student.templateFile);
+    const have = new Set(row.localFiles.map((file) => file.toLowerCase()));
+    const pointed = String(student?.templateFile || "");
+    const owned = studentTemplateNames(row, locals);
+    if (rosterTemplateName(pointed) && locals.some((name) => String(name).toLowerCase() === pointed.toLowerCase())) owned.push(pointed);
+    for (const file of owned) {
+      if (have.has(file.toLowerCase())) continue;
+      row.localFiles.push(file);
+      have.add(file.toLowerCase());
+    }
+    return row;
+  };
+
+  for (const student of Object.values(indexStudents || {})) {
+    if (student) ensure(student);
+  }
+
+  const table = fingerprintTable(sheetRows);
+  if (table) {
+    const seen = new Set();
+    for (let i = table.start; i < table.list.length; i += 1) {
+      const id = canonicalStudentId((table.list[i] || [])[table.layout.id]);
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const known = [...people.values()].find((row) => row.studentId === id);
+      const row = known || ensure({ studentId: id, studentName: "" });
+      if (row) row.sheetRows = fingerprintRowNumbers(sheetRows, id);
+    }
+  }
+
+  const claimed = new Set([...people.values()].flatMap((row) => row.localFiles.map((file) => file.toLowerCase())));
+  const orphans = new Map();
+  for (const file of locals) {
+    if (claimed.has(file.toLowerCase())) continue;
+    const primary = `${templateStem(file).replace(/--\d+$/, "")}.txt`;
+    const group = orphans.get(primary) || [];
+    group.push(file);
+    orphans.set(primary, group);
+  }
+  for (const [primary, files] of orphans) {
+    const row = ensure({ studentId: "", studentName: "" }, primary);
+    if (!row) continue;
+    row.localFiles = files;
+    if (!row.studentName) row.studentName = templateStem(primary);
+  }
+
+  return [...people.values()]
+    .map((row) => ({ ...row, count: Math.max(row.localFiles.length, row.sheetRows.length) }))
+    .filter((row) => row.count > 0)
+    .sort(
+      (a, b) =>
+        a.studentName.localeCompare(b.studentName, "en") ||
+        a.studentId.localeCompare(b.studentId, "en") ||
+        a.key.localeCompare(b.key, "en"),
+    );
+}
+
 /**
  * One cell. Never a whole row. present writes the checkbox value حاضر; anything else clears the cell.
  * The student id is the Marif value. A missing id or two rows with that id write nothing.
