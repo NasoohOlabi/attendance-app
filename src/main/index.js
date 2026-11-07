@@ -2278,9 +2278,9 @@ function registerIpc() {
     } catch (err) {
       const message = err?.message || "The sheet could not be updated.";
       console.error(message);
-      const described = describeApiFailure(message);
-      publish({ syncNote: described.operator, error: described.developer });
-      return { ok: false, error: described.developer || described.operator };
+      const shown = sheetWindow(describeApiFailure(message));
+      publish(shown);
+      return { ok: false, error: shown.error };
     }
   });
   ipcMain.handle("undoAttendance", async (_event, input) => {
