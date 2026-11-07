@@ -195,7 +195,7 @@ test("deleting one student clears that student's sheet rows before local files",
   await expect(app.page.locator("#prints-nav")).toHaveAttribute("aria-current", "page");
 });
 
-test("a failed fingerprint delete keeps that student's local prints", async ({ app }) => {
+test("an unreachable fingerprint delete removes the local print and clears the sheet row when the network returns", async ({ app }) => {
   await app.ready();
   await app.seedPrint(id1, "أحمد طالب");
   app.sheets.grid("FingerPrints").rows.push([id1, "synthetic-print", "12/10/2026 16:55:03"]);
@@ -207,9 +207,10 @@ test("a failed fingerprint delete keeps that student's local prints", async ({ a
   );
   await app.page.locator("#prints-list li").filter({ hasText: id1 }).locator("button").click();
   await app.page.locator("#confirm-ok").click();
-  await expect(app.page.locator("#error")).toContainText("Prints on this computer were kept");
-  expect(await app.files()).toContain("s-00-00-000-001.txt");
-  expect(app.sheets.grid("FingerPrints").rows.some((line) => line[0] === id1)).toBe(true);
+  await expect(app.page.locator("#prints-detail")).toHaveText("Prints deleted.");
+  await expect.poll(() => app.files()).not.toContain("s-00-00-000-001.txt");
+  await expect.poll(() => app.sheets.grid("FingerPrints").rows.some((line) => line[0] === id1)).toBe(false);
+  expect(app.sheets.grid("FingerPrints").rows[0][0]).toBe("student_id");
   expect(app.sheets.grid("Info").rows[2][2]).not.toBe("حاضر");
 });
 
@@ -239,7 +240,7 @@ test("startup restores remote prints and retains local prints absent from the sh
   expect((await app.index()).students[id2].templateFile).toBe("s-00-00-000-002.txt");
 });
 
-test("fingerprint deletion preserves local files when the sheet fails, then clears remote before local", async ({ app }) => {
+test("offline deletion of every fingerprint removes local prints and clears the sheet when the network returns", async ({ app }) => {
   await app.ready();
   await app.seedPrint(id1, "Ahmed Student");
   app.sheets.grid("FingerPrints").rows.push([id1, "synthetic-print", "12/10/2026 16:55:03"]);
@@ -251,14 +252,19 @@ test("fingerprint deletion preserves local files when the sheet fails, then clea
   await app.page.locator("#settings").click();
   await app.page.locator("#clear-prints").click();
   await app.page.locator("#confirm-ok").click();
-  await expect(app.page.locator("#error")).toContainText("offline");
-  expect(await app.files()).toContain("s-00-00-000-001.txt");
+  await expect(app.page.locator("#config-detail")).toHaveText("All fingerprints deleted.");
+  await expect.poll(() => app.files()).toEqual([]);
+  expect(app.sheets.grid("FingerPrints").rows).toHaveLength(2);
+  await expect.poll(async () => (await app.outbox()).items.some((item) => item.kind === "prints-all")).toBe(true);
+
+  await app.restart();
+  expect(await app.files()).toEqual([]);
   expect(app.sheets.grid("FingerPrints").rows).toHaveLength(2);
 
   app.sheets.offline = false;
-  await app.page.locator("#clear-prints").click();
-  await app.page.locator("#confirm-ok").click();
-  await expect.poll(() => app.files()).toEqual([]);
-  expect(app.sheets.grid("FingerPrints").rows).toHaveLength(1);
+  app.enqueue({ exitCode: 2, error: "timeout", events: [] });
+  await expect.poll(() => app.sheets.grid("FingerPrints").rows).toHaveLength(1);
+  expect(await app.files()).toEqual([]);
+  expect(app.sheets.grid("FingerPrints").rows[0][0]).toBe("student_id");
   expect(app.sheets.grid("Info").rows).toEqual(beforeAttendance);
 });

@@ -46,12 +46,23 @@ import {
   fingerprintHeaderMissing,
   fingerprintSheetRow,
   FINGERPRINT_HEADER,
+  attendanceCellPresent,
+  attendanceListed,
+  forgetQueuedPrintDelete,
   overlayPresent,
+  pendingPrintDeletes,
   personOnList,
   planAttendance,
+  presentLogAction,
+  printsToRestore,
   queueAbsent,
   queueClock,
   queuePresent,
+  queuePrintDelete,
+  queuePrintDeleteAll,
+  snapshotRows,
+  todayPeople,
+  todayRecord,
   bestCandidate,
   captureScreen,
   PARTIAL_THRESHOLD,
@@ -720,6 +731,56 @@ test("undo and clock follow the id when queued marks share an unknown row", () =
   const other = personOnList(overlayPresent([], edited, day), { studentId: first.studentId, rowNumber: 0 });
   const undone = queueAbsent(edited, { ...other, at });
   assert.deepEqual(undone.map((item) => [item.studentId, item.time]), [[second.studentId, "08:15"]]);
+});
+
+test("today's saved list returns for the same day and the outbox still wins", () => {
+  const day = "10/10/2026";
+  const at = "2026-10-10T05:00:00.000Z";
+  const saved = todayRecord([{ name: "اسم أول", studentId: "00 00 000 001", rowNumber: 3, time: "08:00", logRow: 4 }], day);
+  assert.deepEqual(todayPeople(saved, day), [{ name: "اسم أول", studentId: "00 00 000 001", rowNumber: 3, time: "08:00", logRow: 4 }]);
+  assert.deepEqual(todayPeople(saved, "11/10/2026"), []);
+  assert.equal(attendanceListed(todayPeople(saved, day), { studentId: "00 00 000 001" }), true);
+  const queued = queuePresent([], { studentId: "00 00 000 002", studentName: "اسم ثان", at, time: "08:10" });
+  const shown = overlayPresent(todayPeople(saved, day), queued, day);
+  assert.deepEqual(shown.map((person) => [person.studentId, person.time]), [
+    ["00 00 000 001", "08:00"],
+    ["00 00 000 002", "08:10"],
+  ]);
+  const clocked = overlayPresent(todayPeople(saved, day), queueClock([], { studentId: "00 00 000 001", studentName: "اسم أول", at, time: "09:00" }), day);
+  assert.equal(clocked[0].time, "09:00");
+  assert.deepEqual(overlayPresent(todayPeople(saved, day), queueAbsent([], { studentId: "00 00 000 001", studentName: "اسم أول", at }), day), []);
+});
+
+test("a repeat present keeps an existing arrival stamp and still writes one when the log is empty", () => {
+  const rows = [["إسم كامل", "معرف", "10/10"], ["", "", ""], ["اسم أول", "00 00 000 001", "حاضر"]];
+  assert.equal(attendanceCellPresent(rows, 3, 2), true);
+  assert.equal(attendanceCellPresent(rows, 3, 1), false);
+  const stamp = "10/10/2026 09:00:03";
+  assert.deepEqual(presentLogAction(true, [{ rowNumber: 5, stamp: "10/10/2026 08:00:03" }], stamp), { op: "keep" });
+  assert.deepEqual(presentLogAction(true, [], stamp), { op: "append" });
+  assert.deepEqual(presentLogAction(true, [{ rowNumber: 5, stamp: "" }], stamp), { op: "replace", rowNumber: 5 });
+  assert.deepEqual(presentLogAction(false, [{ rowNumber: 5, stamp: "10/10/2026 08:00:03" }], stamp), { op: "replace", rowNumber: 5 });
+  assert.deepEqual(snapshotRows(null), []);
+  assert.deepEqual(snapshotRows({ rows }), rows);
+});
+
+test("a pending fingerprint delete is not copied back from the sheet", () => {
+  const sheet = [
+    ["student_id", "fingerprint", "created_at"],
+    ["00 00 000 001", "a", "t"],
+    ["00 00 000 002", "b", "t"],
+  ];
+  const planned = fingerprintFiles(sheet);
+  const one = queuePrintDelete([], "00 00 000 001");
+  assert.deepEqual(printsToRestore(planned, pendingPrintDeletes(one)).map((item) => item.studentId), ["00 00 000 002"]);
+  assert.equal(forgetQueuedPrintDelete(one, "00 00 000 001").some((item) => item.kind === "prints"), false);
+  const all = queuePrintDeleteAll(one);
+  assert.equal(all.some((item) => item.kind === "prints"), false);
+  assert.deepEqual(printsToRestore(planned, pendingPrintDeletes(all)), []);
+  const kept = forgetQueuedPrintDelete(all, "00 00 000 002");
+  assert.deepEqual(kept[0].keep, ["00 00 000 002"]);
+  assert.equal(pendingPrintDeletes(kept).all, true);
+  assert.deepEqual(printsToRestore(planned, pendingPrintDeletes(kept)), []);
 });
 
 test("a present mark puts the حاضر checkbox back on that cell", () => {

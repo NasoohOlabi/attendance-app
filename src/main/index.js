@@ -48,15 +48,26 @@ import {
   columnLetter,
   FINGERPRINT_HEADER,
   fingerprintFiles,
+  fingerprintRowNumbers,
   fingerprintHeaderMissing,
   fingerprintSheetRow,
+  attendanceCellPresent,
   logHits,
   logLayout,
   overlayPresent,
+  pendingPrintDeletes,
   personOnList,
+  presentLogAction,
+  printsToRestore,
   queueAbsent,
   queueClock,
   queuePresent,
+  queuePrintDelete,
+  queuePrintDeleteAll,
+  forgetQueuedPrintDelete,
+  snapshotRows,
+  todayPeople,
+  todayRecord,
   queuedAttendanceStamp,
   stampFromClock,
   withScanTimes,
@@ -565,19 +576,22 @@ async function reloadStudents(config) {
     if (!config.logSpreadsheetId || config.logSheetGid === null) throw new Error("Configure the Pages attendance log.");
     const log = await getSheetGrid(client, config.logSpreadsheetId, config.logSheetGid);
     sheetPeople = presentFromLog(students.map((student) => ({ ...student, studentName: boutyNames.get(canonicalStudentId(student.studentId)) || "" })), log.rows, new Date());
+    rememberToday();
     publish({ present: shownPresent() });
     return { merged: index, rows: log.rows, title: log.title };
   }
   const { title, rows } = await getSheetGrid(client, config.spreadsheetId, config.sheetGid);
-  attendanceRows = rows;
   reportSheet(title, rows);
   const problem = sheetProblem(rows);
   if (problem) throw new Error(problem);
+  attendanceRows = rows;
   const index = await loadIndex(config.fingerprintDir);
   const merged = mergeStudents(index, rows);
   await saveIndex(config.fingerprintDir, merged);
   cacheFromSheet(merged, rows);
   sheetPeople = await timesFor(config, presentToday(rows, new Date()));
+  rememberToday();
+  rememberSnapshot(rows);
   publish({ present: shownPresent(), dashboard: attendanceTrend(rows) });
   return { merged, rows, title };
 }
@@ -604,6 +618,8 @@ async function loadScanTimes() {
     // No remembered scans yet today.
   }
   await loadOutbox();
+  await loadToday();
+  await loadSnapshot();
   try {
     namedClocks = clocksFromAppLog(await readFile(appLogFile(), "utf8"));
   } catch {
@@ -632,10 +648,6 @@ function forgetScan(rowNumber) {
   writeFile(scanTimesPath(), JSON.stringify(scanTimes)).catch((err) => console.error(err.message));
 }
 
-function outboxPath() {
-  return path.join(homedir(), "Masjid", "attendance-outbox.json");
-}
-
 function todayDay() {
   return attendanceStamp(new Date()).split(" ")[0];
 }
@@ -643,7 +655,7 @@ function todayDay() {
 async function loadOutbox() {
   outbox = [];
   try {
-    const saved = JSON.parse(await readFile(outboxPath(), "utf8"));
+    const saved = JSON.parse(await readFile(masjidPath("attendance-outbox.json"), "utf8"));
     if (Array.isArray(saved?.items)) outbox = saved.items;
   } catch {
     outbox = [];
@@ -651,15 +663,48 @@ async function loadOutbox() {
 }
 
 function saveOutbox() {
-  const body = JSON.stringify({ items: outbox });
+  return saveMasjid("attendance-outbox.json", { items: outbox });
+}
+
+function masjidPath(name) {
+  return path.join(homedir(), "Masjid", name);
+}
+
+function saveMasjid(name, value) {
+  const body = JSON.stringify(value);
   const save = outboxSaveTail.then(async () => {
-    const file = outboxPath();
+    const file = masjidPath(name);
     await mkdir(path.dirname(file), { recursive: true });
     await writeFile(`${file}.tmp`, body);
     await rename(`${file}.tmp`, file);
   });
   outboxSaveTail = save.catch(() => {});
   return save;
+}
+
+function rememberToday() {
+  return saveMasjid("attendance-today.json", todayRecord(sheetPeople, todayDay()));
+}
+
+function rememberSnapshot(rows) {
+  return saveMasjid("sheet-snapshot.json", { rows });
+}
+
+async function loadToday() {
+  try {
+    sheetPeople = todayPeople(JSON.parse(await readFile(masjidPath("attendance-today.json"), "utf8")), todayDay());
+  } catch {
+    sheetPeople = [];
+  }
+}
+
+async function loadSnapshot() {
+  try {
+    attendanceRows = snapshotRows(JSON.parse(await readFile(masjidPath("sheet-snapshot.json"), "utf8")));
+  } catch {
+    attendanceRows = [];
+  }
+  state.dashboard = attendanceRows.length ? attendanceTrend(attendanceRows) : [];
 }
 
 function waitingNote() {
@@ -789,6 +834,7 @@ async function writeQueuedPresent(config, item) {
   const when = new Date(item.at);
   if (item.destination === "bouty" && (!config.logSpreadsheetId || config.logSheetGid === null)) throw new Error("Configure the Pages attendance log.");
   if (item.destination === "bouty") item.cell = true;
+  let alreadyPresent = item.already === true;
   if (!item.cell) {
     const [{ title, rows }, layout] = await Promise.all([
       getSheetGrid(client, config.spreadsheetId, config.sheetGid),
@@ -797,6 +843,8 @@ async function writeQueuedPresent(config, item) {
     const plan = planAttendance(rows, item.studentId, when, true, layout);
     if (plan.insert) await ensureDateColumn(client, config.spreadsheetId, config.sheetGid, when);
     if (plan.op !== "update") return plan.op;
+    alreadyPresent = attendanceCellPresent(rows, plan.rowNumber, plan.columnIndex);
+    item.already = alreadyPresent;
     await writeAttendanceCell(client, config.spreadsheetId, title, plan.a1, plan.value);
     item.cell = true;
     item.rowNumber = plan.rowNumber || item.rowNumber;
@@ -809,12 +857,11 @@ async function writeQueuedPresent(config, item) {
       const values = attendanceLogRow(item.studentId, when, header, item.studentName);
       const stamp = queuedAttendanceStamp(item);
       if (stamp) values[logLayout(header).time] = stamp;
-      const hits = logHits(log.rows, item.studentId, when);
-      const hit = hits.at(-1);
-      if (!hit) {
+      const action = presentLogAction(alreadyPresent, logHits(log.rows, item.studentId, when), stamp);
+      if (action.op === "append") {
         await appendSheetRow(client, config.logSpreadsheetId, config.logSheetGid, values);
-      } else if (stamp && hit.stamp !== stamp) {
-        await writeSheetCell(client, config.logSpreadsheetId, log.title, `${columnLetter(logLayout(header).time)}${hit.rowNumber}`, stamp);
+      } else if (action.op === "replace") {
+        await writeSheetCell(client, config.logSpreadsheetId, log.title, `${columnLetter(logLayout(header).time)}${action.rowNumber}`, stamp);
       }
     }
     item.log = true;
@@ -867,7 +914,37 @@ async function writeQueuedClock(config, item) {
   return "ok";
 }
 
+async function restoreKeptPrints(config, ids) {
+  const names = await listTemplateNames(config);
+  for (const id of ids || []) {
+    const files = studentTemplateNames({ studentId: id }, names);
+    const bodies = [];
+    for (const file of files) {
+      try {
+        bodies.push(await readFile(templatePath(config.fingerprintDir, file)));
+      } catch {
+        // The local print is already gone.
+      }
+    }
+    if (bodies.length) await appendFingerprints(config, id, bodies);
+  }
+}
+
+async function writeQueuedPrints(config, item) {
+  if (!config.logSpreadsheetId || config.fingerprintSheetGid == null) return "ok";
+  const grid = await getSheetGrid(client, config.logSpreadsheetId, config.fingerprintSheetGid);
+  if (item.kind === "prints-all") {
+    await clearSheetBelowHeader(client, config.logSpreadsheetId, config.fingerprintSheetGid, grid.rows.length);
+    await restoreKeptPrints(config, item.keep);
+    return "ok";
+  }
+  const rows = fingerprintRowNumbers(grid.rows, item.studentId);
+  if (rows.length) await deleteSheetRows(client, config.logSpreadsheetId, config.fingerprintSheetGid, rows);
+  return "ok";
+}
+
 async function writeQueued(config, item) {
+  if (item.kind === "prints" || item.kind === "prints-all") return writeQueuedPrints(config, item);
   if (item.kind === "absent") return writeQueuedAbsent(config, item);
   if (item.kind === "time") return writeQueuedClock(config, item);
   return writeQueuedPresent(config, item);
@@ -891,7 +968,10 @@ async function drainOutbox() {
     activeWrite = item;
     try {
       const result = await writeQueued(config, item);
-      if (result === "ok") sheetPeople = overlayPresent(sheetPeople, [item], todayDay());
+      if (result === "ok" && item.kind !== "prints" && item.kind !== "prints-all") {
+        sheetPeople = overlayPresent(sheetPeople, [item], todayDay());
+        rememberToday();
+      }
       outbox = outbox.filter((entry) => entry !== item);
       await saveOutbox();
       publish({ present: shownPresent(), syncNote: waitingNote() });
@@ -968,11 +1048,16 @@ async function appendFingerprints(config, studentId, bodies, when = new Date()) 
 /** Copy sheet templates that are missing on disk. Local files the sheet does not list stay. */
 async function syncStoredPrints(config) {
   if (!config.logSpreadsheetId) return;
+  const pending = pendingPrintDeletes(outbox);
+  if (pending.all) {
+    console.log("fingerprint sheet restore skipped");
+    return;
+  }
   const index = await loadIndex(config.fingerprintDir);
   const grid = await getSheetGrid(client, config.logSpreadsheetId, config.fingerprintSheetGid);
   const existing = await listTemplateNames(config);
   const have = new Set(existing.map((name) => name.toLowerCase()));
-  const planned = fingerprintFiles(grid.rows);
+  const planned = printsToRestore(fingerprintFiles(grid.rows), pending);
   let wrote = 0;
   for (const item of planned) {
     if (have.has(item.file.toLowerCase())) continue;
@@ -1655,7 +1740,11 @@ async function assignStudent(key) {
     lastMatch: lastMatchOf(draft, draft.capturedAt),
   };
   let extra = "Saved on this computer.";
-  if (client && canonicalStudentId(draft.studentId)) {
+  if (canonicalStudentId(draft.studentId)) {
+    outbox = forgetQueuedPrintDelete(outbox, draft.studentId);
+    saveOutbox().catch((err) => console.error(err.message));
+  }
+  if (client && canonicalStudentId(draft.studentId) && !outbox.some((item) => item.kind === "prints-all")) {
     void appendFingerprints(config, draft.studentId, savedBodies, draft.capturedAt).catch((err) => {
       console.error(err.message);
       publish({ detail: `${state.detail} The fingerprint sheet was not written.`.trim() });
@@ -1763,34 +1852,19 @@ async function printRoster(config) {
   return { students: studentsWithPrints(index.students, names, rows) };
 }
 
-/** Sheet rows for this student go first. Local files stay if that delete throws. */
-async function deleteStudentPrints(key) {
-  if (!currentConfig?.fingerprintDir) throw new Error("The app is still starting.");
-  const config = currentConfig;
-  const student = (await printRoster(config)).students.find((item) => item.key === String(key || ""));
-  if (!student) throw new Error("Choose a student from the list.");
-  const id = canonicalStudentId(student.studentId);
-  let sheetRows = [];
-  if (id) {
-    if (!client || sheetDenied || !config.logSpreadsheetId) throw new Error("The fingerprint sheet is not available.");
-    try {
-      sheetRows = (await getSheetGrid(client, config.logSpreadsheetId, config.fingerprintSheetGid)).rows;
-    } catch (err) {
-      console.error(err);
-      throw new Error(PRINTS_KEPT);
-    }
-  }
-  const plan = planStudentPrintDelete(student, sheetRows, await listTemplateNames(config));
-  if (plan.sheetRows.length) {
-    try {
-      await deleteSheetRows(client, config.logSpreadsheetId, config.fingerprintSheetGid, plan.sheetRows);
-    } catch (err) {
-      console.error(err);
-      throw new Error(PRINTS_KEPT);
-    }
-  }
+function publishPrintsDeleted() {
+  publish({
+    phase: "prints",
+    headline: "Fingerprints",
+    detail: "Prints deleted.",
+    error: "",
+    canCloseSettings: true,
+  });
+}
+
+async function forgetLocalPrint(config, student, files) {
   printsEpoch += 1;
-  const files = localFilesAfterSheetDelete(plan, true);
+  const id = canonicalStudentId(student.studentId);
   for (const file of files) await rm(templatePath(config.fingerprintDir, file), { force: true });
   const index = await loadIndex(config.fingerprintDir);
   await saveIndex(config.fingerprintDir, dropPrintEnrollment(index, student, files));
@@ -1808,11 +1882,89 @@ async function deleteStudentPrints(key) {
       cachedStudent.capturedAt = "";
     }
   }
+}
+
+/** The sheet could not be reached. The local prints go now and the sheet rows wait in the outbox. */
+async function queueStudentPrintDelete(config, student) {
+  const plan = planStudentPrintDelete(student, [], await listTemplateNames(config));
+  await forgetLocalPrint(config, student, plan.localFiles);
+  const id = canonicalStudentId(student.studentId);
+  if (id) {
+    outbox = queuePrintDelete(outbox, id);
+    saveOutbox().catch((err) => console.error(err.message));
+    void flushOutbox();
+  }
+  publishPrintsDeleted();
+}
+
+/** Sheet rows for this student go first when the sheet answers. An unreachable sheet still drops the local prints. */
+async function deleteStudentPrints(key) {
+  if (!currentConfig?.fingerprintDir) throw new Error("The app is still starting.");
+  const config = currentConfig;
+  const student = (await printRoster(config)).students.find((item) => item.key === String(key || ""));
+  if (!student) throw new Error("Choose a student from the list.");
+  const id = canonicalStudentId(student.studentId);
+  if (id && (sheetDenied || !config.logSpreadsheetId)) throw new Error("The fingerprint sheet is not available.");
+  if (id && !client) {
+    await queueStudentPrintDelete(config, student);
+    return;
+  }
+  let sheetRows = [];
+  if (id) {
+    try {
+      sheetRows = (await getSheetGrid(client, config.logSpreadsheetId, config.fingerprintSheetGid)).rows;
+    } catch (err) {
+      if (isOfflineError(err.message)) {
+        await queueStudentPrintDelete(config, student);
+        return;
+      }
+      console.error(err);
+      throw new Error(PRINTS_KEPT);
+    }
+  }
+  const plan = planStudentPrintDelete(student, sheetRows, await listTemplateNames(config));
+  if (plan.sheetRows.length) {
+    try {
+      await deleteSheetRows(client, config.logSpreadsheetId, config.fingerprintSheetGid, plan.sheetRows);
+    } catch (err) {
+      if (isOfflineError(err.message)) {
+        await queueStudentPrintDelete(config, student);
+        return;
+      }
+      console.error(err);
+      throw new Error(PRINTS_KEPT);
+    }
+  }
+  await forgetLocalPrint(config, student, localFilesAfterSheetDelete(plan, true));
+  publishPrintsDeleted();
+}
+
+async function finishLocalPrintWipe(config, queue) {
+  printsEpoch += 1;
+  pending = null;
+  batch = [];
+  collecting = false;
+  clearBatchImages();
+  allowedImage = "";
+  const removed = await clearFingerprints(config.fingerprintDir);
+  for (const student of Object.values(cached)) {
+    student.templateFile = "";
+    student.capturedAt = "";
+  }
+  if (queue) {
+    outbox = queuePrintDeleteAll(outbox);
+    saveOutbox().catch((err) => console.error(err.message));
+    void flushOutbox();
+  }
+  console.log(`cleared fingerprints removed=${removed}`);
   publish({
-    phase: "prints",
-    headline: "Fingerprints",
-    detail: "Prints deleted.",
+    phase: "config",
+    detail: "All fingerprints deleted.",
     error: "",
+    lastMatch: null,
+    enroll: null,
+    scanImage: "",
+    scanImages: [],
     canCloseSettings: true,
   });
 }
@@ -2118,35 +2270,22 @@ function registerIpc() {
   });
   ipcMain.handle("clearFingerprints", async () => {
     if (!currentConfig?.fingerprintDir) return { ok: false, error: "The app is still starting." };
-    if (!client || sheetDenied || !currentConfig.logSpreadsheetId) {
-      return { ok: false, error: "The fingerprint sheet is not available." };
-    }
+    if (sheetDenied) return { ok: false, error: "The fingerprint sheet is not available." };
+    const config = currentConfig;
     try {
       await exclusive(async () => {
-        const grid = await getSheetGrid(client, currentConfig.logSpreadsheetId, currentConfig.fingerprintSheetGid);
-        await clearSheetBelowHeader(client, currentConfig.logSpreadsheetId, currentConfig.fingerprintSheetGid, grid.rows.length);
-        printsEpoch += 1;
-        const removed = await clearFingerprints(currentConfig.fingerprintDir);
-        pending = null;
-        batch = [];
-        collecting = false;
-        clearBatchImages();
-        allowedImage = "";
-        for (const student of Object.values(cached)) {
-          student.templateFile = "";
-          student.capturedAt = "";
+        const unreachable = !client || !config.logSpreadsheetId;
+        if (!unreachable) {
+          try {
+            const grid = await getSheetGrid(client, config.logSpreadsheetId, config.fingerprintSheetGid);
+            await clearSheetBelowHeader(client, config.logSpreadsheetId, config.fingerprintSheetGid, grid.rows.length);
+          } catch (err) {
+            if (!isOfflineError(err.message)) throw err;
+            await finishLocalPrintWipe(config, true);
+            return;
+          }
         }
-        console.log(`cleared fingerprints removed=${removed}`);
-        publish({
-          phase: "config",
-          detail: "All fingerprints deleted.",
-          error: "",
-          lastMatch: null,
-          enroll: null,
-          scanImage: "",
-          scanImages: [],
-          canCloseSettings: true,
-        });
+        await finishLocalPrintWipe(config, unreachable);
       });
       return { ok: true };
     } catch (err) {
