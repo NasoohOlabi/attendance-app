@@ -158,6 +158,11 @@ const AR = {
   Setup: "الإعداد",
   "Waiting to sync": "بانتظار المزامنة",
   "The student list could not be loaded. The computer is offline.": "تعذّر تحميل قائمة الطلاب. الجهاز غير متصل.",
+  "The student list could not be loaded.": "تعذّر تحميل قائمة الطلاب.",
+  "The time log was not written.": "لم يُكتب سجل الوقت.",
+  "The attendance cell was not written.": "لم تُكتب خلية الحضور.",
+  "The fingerprint sheet could not be read.": "تعذّرت قراءة ورقة البصمات.",
+  "The sheet could not be updated.": "تعذّر تحديث الكشف.",
   "Google Sheets is rate limited. Trying again in a minute.": "تجاوز جداول غوغل حد القراءة. المحاولة بعد دقيقة.",
   "Marked present.": "سُجّل حاضراً.",
   "Marked present. The time log was not written.": "سُجّل حاضراً. لم يُكتب سجل الوقت.",
@@ -267,6 +272,29 @@ function pattern(value) {
 
   match = value.match(/^Can't load students from the sheet: (.+)$/);
   if (match) return `تعذر تحميل الطلاب من الكشف: ${translate(match[1], "ar")}`;
+
+  match = value.match(/^(.+) failed \(([^)]+)\): (.+)\.$/);
+  if (match) {
+    const operation = {
+      "Time log append": "إضافة سجل الوقت",
+      "Time log clear": "مسح سجل الوقت",
+      "Time log read": "قراءة سجل الوقت",
+      "Roster read": "قراءة قائمة الطلاب",
+      "Fingerprint sheet append": "إضافة ورقة البصمات",
+      "Fingerprint sheet read": "قراءة ورقة البصمات",
+      "Attendance cell": "خلية الحضور",
+      "Sheet append": "إضافة صف",
+      "Sheet update": "تحديث الكشف",
+      "Google request": "طلب غوغل",
+    }[match[1]] || match[1];
+    const reason = {
+      "log unavailable": "السجل غير متاح",
+      "permission denied": "لا إذن",
+      "protected range": "نطاق محمي",
+      "the request failed": "فشل الطلب",
+    }[match[3]] || match[3];
+    return `${operation} فشلت (${ltr(match[2])}): ${reason}.`;
+  }
 
   match = value.match(/^Sheet permission denied\. Share as Editor with (.+)$/);
   if (match) return `لا إذن على الكشف. شارك كمحرر مع ${ltr(match[1])}`;

@@ -9,15 +9,111 @@ import { planDateColumn, sheetsSerial } from "./store.mjs";
 
 export const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
 
+const SHEET_OPERATIONS = [
+  ["Time log append", "The time log was not written."],
+  ["Time log clear", "The time log was not written."],
+  ["Time log read", "The time log was not written."],
+  ["Roster read", "The student list could not be loaded."],
+  ["Fingerprint sheet append", "The fingerprint sheet was not written."],
+  ["Fingerprint sheet read", "The fingerprint sheet could not be read."],
+  ["Attendance cell", "The attendance cell was not written."],
+  ["Sheet append", "The sheet could not be updated."],
+  ["Sheet update", "The sheet could not be updated."],
+  ["Google request", "The sheet could not be updated."],
+];
+
+function quotedSheetTitle(url) {
+  const decoded = (() => {
+    try { return decodeURIComponent(url); } catch { return url; }
+  })();
+  return (decoded.match(/values\/'((?:[^']|'')*)'!/) || [])[1]?.replaceAll("''", "'") || "";
+}
+
+function operationFromRequest(method, url) {
+  const title = quotedSheetTitle(url);
+  const decoded = (() => {
+    try { return decodeURIComponent(url); } catch { return url; }
+  })();
+  const label = `${title} ${decoded}`.toLowerCase();
+  const log = label.includes("attendancelog") || title.includes("حضور");
+  const prints = label.includes("fingerprint");
+  if (decoded.includes(":append")) {
+    if (prints) return "Fingerprint sheet append";
+    if (log) return "Time log append";
+    return "Sheet append";
+  }
+  if (decoded.includes(":clear")) return "Time log clear";
+  if (method === "GET" && decoded.includes("/values/")) {
+    if (prints) return "Fingerprint sheet read";
+    if (log) return "Time log read";
+    return "Roster read";
+  }
+  if ((method === "PUT" || method === "POST") && decoded.includes("/values/")) return "Attendance cell";
+  if (decoded.includes(":batchUpdate")) return "Sheet update";
+  return "Google request";
+}
+
+function shortReason(detail) {
+  let text = String(detail || "").trim();
+  if (text.startsWith("{") || text.startsWith("[")) {
+    try {
+      const body = JSON.parse(text);
+      const error = body?.error;
+      text = (typeof error === "string" ? error : error?.message || error?.status || "") || body?.message || "";
+    } catch {
+      text = "";
+    }
+  }
+  text = text.replace(/https?:\/\/\S+/gi, "").replace(/[{}"[\]]/g, " ").replace(/\s+/g, " ").trim();
+  if (/does not have permission|insufficient permission/i.test(text)) return "permission denied";
+  if (/protected cell|protected range/i.test(text)) return "protected range";
+  if (!text) return "the request failed";
+  return text.slice(0, 80);
+}
+
+function parseGoogleFailure(message) {
+  const match = String(message || "").match(/^Google API (\w+) (\S+) failed \(([^)]+)\): ([\s\S]*)$/);
+  if (!match) return null;
+  return {
+    method: match[1],
+    url: match[2],
+    status: match[3],
+    detail: match[4],
+    operation: operationFromRequest(match[1], match[2]),
+  };
+}
+
+function operatorFor(operation) {
+  return SHEET_OPERATIONS.find(([name]) => name === operation)?.[1] || "The sheet could not be updated.";
+}
+
+/** One sentence for the room, and one line for the person fixing it. The URL stays out of both. */
+export function describeApiFailure(message, email = "") {
+  const text = String(message || "").trim();
+  const parsed = parseGoogleFailure(text);
+  if (/protected cell|protected range/i.test(text)) {
+    return {
+      operator: "That cell is in a protected range, so the sheet was not changed.",
+      developer: `${parsed?.operation || "Attendance cell"} failed (${parsed?.status || "403"}): protected range.`,
+    };
+  }
+  if (/does not have permission|insufficient permission/i.test(text)) {
+    return {
+      operator: email ? `Sheet permission denied. Share as Editor with ${email}` : "Sheet permission denied.",
+      developer: `${parsed?.operation || "Google request"} failed (${parsed?.status || "403"}): permission denied.`,
+    };
+  }
+  if (!parsed) return { operator: text, developer: "" };
+  const reason = shortReason(parsed.detail);
+  return {
+    operator: operatorFor(parsed.operation),
+    developer: `${parsed.operation} failed (${parsed.status}): ${reason}.`,
+  };
+}
+
 /** Share-as-Editor only when the API itself says the caller lacks permission. */
 export function explainApiFailure(message, email = "") {
-  const text = String(message || "").trim();
-  if (/protected cell|protected range/i.test(text)) {
-    return "That cell is in a protected range, so the sheet was not changed.";
-  }
-  const lacksPermission = /does not have permission|insufficient permission/i.test(text);
-  if (!lacksPermission) return text;
-  return email ? `Sheet permission denied. Share as Editor with ${email}` : "Sheet permission denied.";
+  return describeApiFailure(message, email).operator;
 }
 
 export function isSheetPermissionError(message) {

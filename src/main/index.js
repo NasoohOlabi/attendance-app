@@ -14,6 +14,7 @@ import { appLogFile, startAppLog } from "../log.mjs";
 import { updaterChannel, updaterErrorDetails, updaterInfoDetails, updaterShouldOffer } from "../update.mjs";
 import {
   createGoogle,
+  describeApiFailure,
   explainApiFailure,
   isOfflineError,
   sheetOfflineNote,
@@ -446,6 +447,19 @@ async function accountEmail(config) {
 
 async function failureNote(config, err) {
   return explainApiFailure(err?.message || "", await accountEmail(config));
+}
+
+/** The full request stays in the diagnostic log. The window gets one sentence and one short line. */
+async function publishSheetFailure(config, err, { gen, keepDetail = false } = {}) {
+  const message = err?.message || String(err || "");
+  console.error(message);
+  if (publishOffline(message, gen)) return;
+  const described = describeApiFailure(message, await accountEmail(config));
+  const patch = { error: described.developer };
+  if (keepDetail) patch.syncNote = outbox.length ? "Waiting to sync" : described.operator;
+  else patch.syncNote = described.operator;
+  if (described.operator === described.developer) patch.error = "";
+  publish(patch, gen);
 }
 
 function publishOffline(message, gen) {
@@ -977,22 +991,10 @@ async function drainOutbox() {
       publish({ present: shownPresent(), syncNote: waitingNote() });
       if (result !== "ok") publish({ error: markDetail({ op: result, value: "حاضر" }) || "The sheet was not changed." });
     } catch (err) {
-      console.error(err.message);
-      publishShown(item.kind === "present" && item.cell ? {
-        detail: "Marked present. The time log was not written.",
-      } : {});
-      if (isSheetPermissionError(err.message)) {
-        sheetDenied = true;
-        const note = await failureNote(config, err);
-        publish({ syncNote: note, error: note });
-        return;
-      }
-      if (isOfflineError(err.message)) {
-        publish({ syncNote: "Waiting to sync", error: "" });
-        return;
-      }
-      const note = await failureNote(config, err);
-      publish({ syncNote: note, error: note });
+      const marked = item.kind === "present" && item.cell;
+      if (marked) publishShown({ detail: "Marked present. The time log was not written." });
+      if (isSheetPermissionError(err.message)) sheetDenied = true;
+      await publishSheetFailure(config, err, { keepDetail: marked });
       return;
     } finally {
       activeWrite = null;
@@ -1003,12 +1005,10 @@ async function drainOutbox() {
   try {
     await reloadStudents(config);
   } catch (err) {
-    if (isSheetPermissionError(err.message)) {
-      sheetDenied = true;
-      const note = await failureNote(config, err);
-      publish({ syncNote: note, error: note });
-    } else if (!isOfflineError(err.message)) {
-      console.error(err.message);
+    if (isOfflineError(err.message)) console.error(err.message);
+    else {
+      if (isSheetPermissionError(err.message)) sheetDenied = true;
+      await publishSheetFailure(config, err);
     }
   }
 }
@@ -1099,11 +1099,8 @@ async function safeSync(config, gen) {
     if (sheetDenied || gen !== generation) return;
     if (!outbox.length) publish({ syncNote: `Synced ${new Date().toLocaleTimeString()}` }, gen);
   } catch (err) {
-    const offline = isOfflineError(err.message);
-    const note = offline ? "Waiting to sync" : await failureNote(config, err);
     if (isSheetPermissionError(err.message)) sheetDenied = true;
-    console.log(note);
-    publish({ syncNote: note, error: offline ? "" : note }, gen);
+    await publishSheetFailure(config, err, { gen });
   }
 }
 
@@ -1113,8 +1110,10 @@ async function showPending(config, gen, reason = "") {
   try {
     await reloadStudents(config);
   } catch (err) {
-    error = config.attendanceDestination === "bouty" ? `Can't load the Pages attendance log: ${err.message}` : `Can't load students from the sheet: ${err.message}`;
-    detail = error;
+    console.error(err.message);
+    const described = describeApiFailure(err.message);
+    detail = described.operator || "The student list could not be loaded.";
+    error = described.developer;
     const index = await loadIndex(config.fingerprintDir);
     cacheStudents(index.students);
   }
@@ -1401,7 +1400,11 @@ async function prepareGoogle(config, gen) {
     client = await createGoogle(config, await credentialStore(config).read());
   } catch (err) {
     client = null;
-    if (!publishOffline(err.message, gen)) publish({ error: err.message }, gen);
+    console.error(err.message);
+    if (!publishOffline(err.message, gen)) {
+      const described = describeApiFailure(err.message);
+      publish({ syncNote: described.operator, error: described.developer }, gen);
+    }
   }
   return config;
 }
@@ -1431,12 +1434,7 @@ async function runLoop(config, gen) {
       });
     } catch (err) {
       if (isSheetPermissionError(err.message)) sheetDenied = true;
-      if (publishOffline(err.message, gen)) console.error(err.message);
-      else {
-        const note = await failureNote(config, err);
-        console.log(note);
-        publish({ syncNote: note, error: note }, gen);
-      }
+      await publishSheetFailure(config, err, { gen });
     } finally {
       sheetReady = true;
     }
@@ -2255,8 +2253,10 @@ function registerIpc() {
     } catch (err) {
       if (publishOffline(err?.message)) return { ok: false };
       const message = err?.message || "The sheet is not available.";
-      publish({ syncNote: message, error: message });
-      return { ok: false, error: message };
+      console.error(message);
+      const described = describeApiFailure(message);
+      publish({ syncNote: described.operator, error: described.developer });
+      return { ok: false, error: described.developer || described.operator };
     }
   });
   ipcMain.handle("undoAttendance", async (_event, input) => {
