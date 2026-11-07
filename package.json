@@ -1,6 +1,6 @@
 {
   "name": "attendance-app",
-  "version": "0.1.26",
+  "version": "0.1.26-nightly.25",
   "private": true,
   "description": "Masjid attendance fingerprint app",
   "author": "Masjid",
