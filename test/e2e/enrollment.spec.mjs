@@ -4,15 +4,17 @@ import path from "node:path";
 
 const id1 = "00 00 000 005";
 const id2 = "00 00 000 006";
+const studentId = "bouty:9";
+const studentNumber = "90";
 
 async function captureUnknown(app, template = "new-print") {
   app.enqueue({ template });
   await expect(app.page.locator("#pending")).toBeVisible();
 }
 
-async function chooseStudent(app, id) {
+async function chooseStudent(app) {
   await app.page.locator("#search").fill("Website");
-  const choice = app.page.locator("#list li button").filter({ hasText: id });
+  const choice = app.page.locator("#list li button").filter({ hasText: studentNumber });
   await expect(choice).toHaveCount(1);
   await choice.click();
   await expect(app.page.locator("#ready")).toBeVisible();
@@ -27,13 +29,13 @@ async function addScans(app, templates) {
 test("assigning an unknown print links the Bouty student and matches it later", async ({ app }) => {
   await app.ready();
   await captureUnknown(app, "first-capture");
-  await chooseStudent(app, id1);
+  await chooseStudent(app);
 
   const index = await app.index();
-  expect(index.students[id1]).toMatchObject({ studentId: id1, templateFile: "s-00-00-000-005.txt" });
-  expect(await readFile(path.join(app.prints, "templates", index.students[id1].templateFile), "utf8")).toBe("first-capture");
+  expect(index.students[studentId]).toMatchObject({ studentId, templateFile: "s-bouty-9.txt" });
+  expect(await readFile(path.join(app.prints, "templates", index.students[studentId].templateFile), "utf8")).toBe("first-capture");
 
-  app.enqueue({ template: "recognized-second-capture", matchSid: "s-00-00-000-005", score: 18 });
+  app.enqueue({ template: "recognized-second-capture", matchSid: "s-bouty-9", score: 18 });
   await expect(app.page.locator("#last-name")).toHaveText("Website Student");
   await expect(app.page.locator("#today-count")).toHaveText("1");
 });
@@ -41,9 +43,11 @@ test("assigning an unknown print links the Bouty student and matches it later", 
 test("a second assignment adds a print and keeps the first", async ({ app }) => {
   await app.ready();
   await app.seedPrint(id1, "أحمد طالب");
+  await app.restart();
+  await app.ready();
   await captureUnknown(app, "second-capture");
   await app.page.locator("#search").fill("Website");
-  const choice = app.page.locator("#list li button").filter({ hasText: id1 });
+  const choice = app.page.locator("#list li button").filter({ hasText: studentNumber });
   await expect(choice).toContainText("1 print");
   await expect(choice).not.toContainText("replace");
   await choice.click();
@@ -51,7 +55,7 @@ test("a second assignment adds a print and keeps the first", async ({ app }) => 
 
   expect(await readFile(path.join(app.prints, "templates", "s-00-00-000-005.txt"), "utf8")).toBe("synthetic-print");
   expect(await readFile(path.join(app.prints, "templates", "s-00-00-000-005--2.txt"), "utf8")).toBe("second-capture");
-  expect((await app.index()).students[id1].templateFile).toBe("s-00-00-000-005.txt");
+  expect((await app.index()).students[studentId].templateFile).toBe("s-00-00-000-005.txt");
 });
 
 test("Done saves three kept scans as separate files locally", async ({ app }) => {
@@ -60,13 +64,13 @@ test("Done saves three kept scans as separate files locally", async ({ app }) =>
   await addScans(app, ["extra-one", "extra-two"]);
   await app.page.locator("#enroll-done").click();
   await expect(app.page.locator("#pending")).toBeVisible();
-  await chooseStudent(app, id1);
+  await chooseStudent(app);
 
   const names = (await app.files()).sort();
-  expect(names).toEqual(["s-00-00-000-005--2.txt", "s-00-00-000-005--3.txt", "s-00-00-000-005.txt"]);
-  expect(await readFile(path.join(app.prints, "templates", "s-00-00-000-005.txt"), "utf8")).toBe("primary");
-  expect(await readFile(path.join(app.prints, "templates", "s-00-00-000-005--2.txt"), "utf8")).toBe("extra-one");
-  expect(await readFile(path.join(app.prints, "templates", "s-00-00-000-005--3.txt"), "utf8")).toBe("extra-two");
+  expect(names).toEqual(["s-bouty-9--2.txt", "s-bouty-9--3.txt", "s-bouty-9.txt"]);
+  expect(await readFile(path.join(app.prints, "templates", "s-bouty-9.txt"), "utf8")).toBe("primary");
+  expect(await readFile(path.join(app.prints, "templates", "s-bouty-9--2.txt"), "utf8")).toBe("extra-one");
+  expect(await readFile(path.join(app.prints, "templates", "s-bouty-9--3.txt"), "utf8")).toBe("extra-two");
 });
 
 test("Rescan replaces only the latest kept capture", async ({ app }) => {
@@ -82,12 +86,12 @@ test("Rescan replaces only the latest kept capture", async ({ app }) => {
   await expect(app.page.locator("#enroll-done")).toHaveText("Done · 2 scans");
   await app.page.locator("#enroll-done").click();
   await expect(app.page.locator("#pending")).toBeVisible();
-  await chooseStudent(app, id1);
+  await chooseStudent(app);
 
-  expect(await app.files()).toEqual(expect.arrayContaining(["s-00-00-000-005.txt", "s-00-00-000-005--2.txt"]));
+  expect(await app.files()).toEqual(expect.arrayContaining(["s-bouty-9.txt", "s-bouty-9--2.txt"]));
   expect(await app.files()).toHaveLength(2);
-  expect(await readFile(path.join(app.prints, "templates", "s-00-00-000-005--2.txt"), "utf8")).toBe("keep-replacement");
-  expect(await app.files()).not.toContain("s-00-00-000-005--3.txt");
+  expect(await readFile(path.join(app.prints, "templates", "s-bouty-9--2.txt"), "utf8")).toBe("keep-replacement");
+  expect(await app.files()).not.toContain("s-bouty-9--3.txt");
 });
 
 test("unassigned scans collected after More are dropped when the app restarts", async ({ app }) => {

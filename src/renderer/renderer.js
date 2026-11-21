@@ -932,8 +932,7 @@ async function confirmManual(student) {
   const accepted = await askConfirm({
     title: "Student details",
     name: student.studentName || "",
-    id: student.studentId || "",
-    detail: !student.studentId ? "Bouty students need an unambiguous source ID." : "",
+    id: String(student.studentNumber || student.id || ""),
     fields: student.fields,
     canConfirm: Boolean(student.studentId),
     confirmLabel: "Mark present",

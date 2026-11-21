@@ -1,6 +1,6 @@
 # Masjid Attendance
 
-Windows attendance app for the Bouty mosque roster. A ZK4500 scan identifies a student by their Marif ID and queues attendance for Bouty. Fingerprint templates stay on this computer.
+Windows attendance app for the Bouty mosque roster. A ZK4500 scan identifies a student by their Bouty ID and queues attendance for Bouty. Fingerprint templates stay on this computer.
 
 ## Set up development
 
@@ -24,7 +24,7 @@ Never commit credentials, real roster data, fingerprint templates, or local conf
 
 Sign in once in **Settings**. The app verifies the account on Bouty and saves the credentials with Windows encryption. It reuses one session for roster lookups and writes, and reconnects with the saved account after restarting or when the website session expires. Use **Sign out** to clear the saved account and cookies. Pending attendance is kept for the original account and resumes after signing back in.
 
-On **Attendance**, use **Search students** to find students by name or number. Page through the roster or select **Refresh** to reload it. Select a student to view their profile or mark them present. Fingerprint enrollment and automatic attendance use the Marif source ID from the student's Bouty notes. The active course needs an existing attendance day with group sessions.
+On **Attendance**, use **Search students** to find students by name or number. Page through the roster or select **Refresh** to reload it. Select a student to view their profile or mark them present. Fingerprint enrollment and automatic attendance use the Bouty student ID. When the complete roster is available, the app uses the Marif source ID in the student's Bouty notes to migrate unambiguous legacy links. The existing template files stay where they are. The active course needs an existing attendance day with group sessions.
 
 After the first successful roster download, the app keeps an encrypted copy for offline student search, fingerprint enrollment, and manual attendance. Attendance waits in the queue until Bouty is reachable. **Refresh** replaces the saved list after a complete download, and signing out clears it.
 
@@ -34,7 +34,7 @@ The advanced settings allow explicit IDs when automatic lookup is unavailable:
 
 ```json
 {
-  "mapping": [{ "studentId": "00 00 000 001", "enrollmentId": 123 }],
+  "mapping": [{ "studentId": "bouty:42", "enrollmentId": 123 }],
   "days": { "2026-10-31": 456 },
   "presentStatusId": 1,
   "absentStatusId": 2

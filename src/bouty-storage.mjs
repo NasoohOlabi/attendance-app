@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { canonicalStudentId, outboxDay } from "./store.mjs";
+import { canonicalPrintStudentId, outboxDay } from "./store.mjs";
 
 async function atomicWrite(file, bytes) {
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -40,7 +40,7 @@ export function parseBoutyMapping(rows) {
   const mapping = new Map();
   const enrolments = new Set();
   for (const row of rows) {
-    const student = canonicalStudentId(row?.studentId);
+    const student = canonicalPrintStudentId(row?.studentId);
     const enrolment = Number(row?.enrollmentId);
     if (!student || !Number.isSafeInteger(enrolment) || enrolment < 1) throw new Error("Invalid Bouty mapping.");
     if (mapping.has(student) || enrolments.has(enrolment)) throw new Error("Duplicate Bouty mapping.");

@@ -3,8 +3,9 @@ import test from "node:test";
 import { createBoutyClient } from "../../src/bouty.mjs";
 import { createBoutyCredentials, createBoutyQueue, parseBoutyMapping } from "../../src/bouty-storage.mjs";
 import { createBoutySync } from "../../src/bouty-sync.mjs";
-import { createBoutyResolver, boutyStudentChoices, applyBoutyProfile, normalizeBoutySourceId } from "../../src/bouty-resolve.mjs";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { createBoutyResolver, boutyStudentChoices, applyBoutyProfile, migrateBoutyPrintLinks } from "../../src/bouty-resolve.mjs";
+import { captureScreen, loadIndex, saveIndex, studentsWithPrints } from "../../src/store.mjs";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
@@ -96,28 +97,32 @@ test("student mapping refuses duplicate students and enrolments", () => {
   assert.throws(() => parseBoutyMapping([{ studentId: "00 00 000 001", enrollmentId: 7 }, { studentId: "00 00 000 002", enrollmentId: 7 }]), /Duplicate/);
 });
 
-test("Bouty picker uses site names and refuses ambiguous source or local fingerprint IDs", () => {
+test("migration preserves linked samples and leaves ambiguous IDs alone", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "bouty-migrate-"));
+  const primary = "s-00-1.txt";
   const profiles = [
     { id: 1, studentName: "Current site name", sourceIds: ["001"] },
     { id: 2, studentName: "Duplicate A", sourceIds: ["00 02"] },
-    { id: 3, studentName: "Duplicate B", sourceIds: ["0002"] },
+    { id: 3, studentName: "Duplicate B", sourceIds: ["0002", "3"] },
     { id: 4, studentName: "Missing ID", sourceIds: [] },
+    { id: 5, studentName: "Conflicting local IDs", sourceIds: ["5"] },
   ];
-  assert.deepEqual(boutyStudentChoices(profiles, { old: { studentId: "00 1", studentName: "Old sheet name", templateFile: "print.txt" } }), [
-    { siteId: 1, studentId: "00 1", studentName: "Current site name", templateFile: "print.txt", capturedAt: "" },
-  ]);
-  assert.deepEqual(boutyStudentChoices([profiles[0]], { a: { studentId: "001" }, b: { studentId: "00 1" } }), []);
-});
-
-test("padded roster IDs match numeric site IDs without accepting nonnumeric values", () => {
-  assert.equal(normalizeBoutySourceId("00 00 000 005"), "5");
-  assert.equal(normalizeBoutySourceId("5"), "5");
-  assert.equal(normalizeBoutySourceId("not an ID"), "");
-  assert.deepEqual(boutyStudentChoices([{ id: 9, studentName: "Site", sourceIds: ["5"] }],
-    { x: { studentId: "00 00 000 005", templateFile: "print.txt" } }).map((p) => p.studentId), ["00 00 000 005"]);
-  assert.deepEqual(boutyStudentChoices([{ id: 9, studentName: "Site", sourceIds: ["5"] }], {}).map((p) => p.studentId), ["00 00 000 005"]);
-  assert.deepEqual(boutyStudentChoices([{ id: 9, studentName: "Site", sourceIds: ["12345678901"] }], {}), []);
-  assert.deepEqual(boutyStudentChoices([{ id: 9, studentName: "One", sourceIds: ["5"] }, { id: 10, studentName: "Two", sourceIds: ["0005"] }], {}), []);
+  const index = await loadIndex(dir);
+  index.students = { "00 1": { studentId: "00 1", templateFile: primary },
+    "2": { studentId: "2" }, "5": { studentId: "5" }, "005": { studentId: "005" } };
+  await writeFile(path.join(dir, "templates", primary), "first");
+  await writeFile(path.join(dir, "templates", "s-00-1--2.txt"), "second");
+  assert.equal(migrateBoutyPrintLinks(index, profiles), true);
+  await saveIndex(dir, index);
+  const saved = await loadIndex(dir);
+  assert.deepEqual(Object.keys(saved.students).sort(), ["005", "2", "5", "bouty:1"]);
+  assert.equal(migrateBoutyPrintLinks(saved, profiles), false);
+  const scan = captureScreen(saved.students, { ok: true, matchScore: 12, matchSid: "s-00-1--2" });
+  assert.equal(scan.student.studentId, "bouty:1");
+  assert.deepEqual(studentsWithPrints(saved.students, [primary, "s-00-1--2.txt"])[0].localFiles, [primary, "s-00-1--2.txt"]);
+  const choices = boutyStudentChoices(profiles, saved.students);
+  assert.deepEqual(choices[0], { siteId: 1, studentId: "bouty:1", studentName: "Current site name", templateFile: primary, capturedAt: "" });
+  assert.equal(choices.find((choice) => choice.siteId === 4).studentId, "bouty:4");
 });
 
 test("a delayed Bouty profile cannot replace a newer scan", () => {
@@ -245,6 +250,7 @@ test("Bouty resolves the exact source ID, active enrolment, day and group withou
     ],
   });
   assert.deepEqual(await resolve({ studentId: "001", studentName: "Same Name", date: "2026-10-31", kind: "present" }), { dayId: 22, enrollmentId: 31, statusId: 1 });
+  assert.deepEqual(await resolve({ studentId: "bouty:12", date: "2026-10-31", kind: "present" }), { dayId: 22, enrollmentId: 31, statusId: 1 });
   assert.deepEqual(await resolve({ studentId: "001", studentName: "Same Name", date: "2026-10-31", kind: "absent" }), { dayId: 22, enrollmentId: 31, statusId: 2 });
   await assert.rejects(resolve({ studentId: "003", studentName: "Same Name", date: "2026-10-31", kind: "present" }), /identity is missing/);
   hasAttendanceDay = false;

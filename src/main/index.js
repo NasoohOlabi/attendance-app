@@ -7,17 +7,17 @@ import electronUpdater from "electron-updater";
 import { createBoutyClient } from "../bouty.mjs";
 import { createBoutyCredentials, createBoutyQueue, createBoutyRosterCache, parseBoutyMapping } from "../bouty-storage.mjs";
 import { createBoutySync } from "../bouty-sync.mjs";
-import { applyBoutyProfile, boutyStudentChoices, normalizeBoutySourceId } from "../bouty-resolve.mjs";
+import { applyBoutyProfile, boutySourceLinks, boutyStudentChoices, migrateBoutyPrintLinks, normalizeBoutySourceId } from "../bouty-resolve.mjs";
 import { legacyUserDataPath, loadConfig, scannerExeInResources, updateChannelPreferencePath } from "../config.mjs";
 import { appLogFile, startAppLog } from "../log.mjs";
 import { updaterChannel, updaterErrorDetails, updaterInfoDetails, updaterShouldOffer } from "../update.mjs";
 import { appendScanTrace, beginScanAttempt, mergeCapturedFiles, planScanRetry, runIdentify, SCAN_OUTAGE_MESSAGE, SCAN_RETRY_PAUSE_MS } from "../scan.mjs";
 import { createHash } from "node:crypto";
 import {
-  attendanceStamp, canonicalStudentId, captureScreen, clearFingerprints, clockFromStamp,
+  attendanceStamp, boutyProfileId, canonicalPrintStudentId, captureScreen, clearFingerprints, clockFromStamp,
   dropPrintEnrollment, fuzzyStudents, loadIndex, outboxDay, pendingPath, personOnList,
   planBatchFiles, planStudentPrintDelete, putStudent, saveIndex, studentsWithPrints,
-  studentKey, studentTemplateNames, templateFileForStudent, templatePath, writeLog,
+  enrollmentTemplateFile, studentKey, studentTemplateNames, templatePath, writeLog,
 } from "../store.mjs";
 
 const mainDir = path.dirname(fileURLToPath(import.meta.url));
@@ -125,8 +125,13 @@ function refreshRoster() {
       if (version !== boutyAccountVersion || boutySigningOut) throw new Error("Bouty account changed.");
       const snapshot = [...students.values()];
       await rosterCache.save(owner, snapshot);
+      await exclusive(async () => {
+        if (version !== boutyAccountVersion || boutySigningOut) throw new Error("Bouty account changed.");
+        if (currentConfig) await ensureRoster(currentConfig, snapshot);
+      });
       roster = snapshot;
       cached = {};
+      await publishAttendance();
       return snapshot;
     });
   })().finally(() => {
@@ -137,20 +142,23 @@ function refreshRoster() {
 }
 
 function loadBoutyProfile(student, at) {
-  const id = canonicalStudentId(student.studentId);
+  const id = canonicalPrintStudentId(student.studentId);
   if (!id) return;
-  const matching = (roster || []).filter((profile) => profile.sourceIds.some((source) => normalizeBoutySourceId(source) === normalizeBoutySourceId(id)));
+  const key = normalizeBoutySourceId(id);
+  const link = boutySourceLinks(roster).get(key);
+  const profileId = boutyProfileId(link || id);
+  const saved = roster?.find((profile) => profile.id === profileId);
   const show = (profile) => {
       boutyNames.set(id, profile.studentName);
       const match = applyBoutyProfile(state.lastMatch, at, id, profile, "bouty");
       if (match) publish({ lastMatch: match, present: shownPresent() });
   };
-  if (matching.length === 1) show(matching[0]);
-  if (!net.isOnline() && matching.length === 1) return;
-  void withBoutyLookup((api) => api.student({ studentId: id, studentName: student.studentName || "" }))
+  if (saved) show(saved);
+  if (!net.isOnline() && saved) return;
+  void withBoutyLookup((api) => api.student({ studentId: link || id, studentName: student.studentName || "", studentNumber: saved?.studentNumber }))
     .then(show).catch(() => {
-      if (matching.length === 1) return;
-      if (!boutyEnabled || state.lastMatch?.at !== at || canonicalStudentId(state.lastMatch?.studentId) !== id) return;
+      if (saved) return;
+      if (!boutyEnabled || state.lastMatch?.at !== at || canonicalPrintStudentId(state.lastMatch?.studentId) !== id) return;
       publish({ lastMatch: { ...state.lastMatch, profileStatus: "Bouty student information is unavailable." } });
     });
 }
@@ -230,10 +238,11 @@ async function setupBouty() {
       if (!boutySigningOut && boutyEnabled) await boutySession.run(run);
     }),
     accountKey: () => boutyOwner,
+    sourceLinks: () => boutySourceLinks(roster),
     settings: async () => boutySettings,
     studentName: async (id) => {
       const index = await loadIndex(currentConfig?.fingerprintDir || path.join(homedir(), "Masjid", "v1", "fingerprints"));
-      return Object.values(index.students).find((student) => canonicalStudentId(student.studentId) === id)?.studentName || "";
+      return Object.values(index.students).find((student) => canonicalPrintStudentId(student.studentId) === id)?.studentName || "";
     },
     onStatus: publishBouty,
   });
@@ -455,14 +464,16 @@ async function publishAttendance() {
   const records = owner ? await boutyQueue.attendance() : [];
   if (owner !== boutyOwner) return;
   const days = new Map();
+  const links = boutySourceLinks(roster);
   for (const record of records) {
     if (record.owner !== owner) continue;
     const day = outboxDay(record.at);
     if (!days.has(day)) days.set(day, new Map());
     const students = days.get(day);
-    if (record.kind === "absent") students.delete(record.studentId);
-    else students.set(record.studentId, {
-      studentId: record.studentId,
+    const studentId = links.get(normalizeBoutySourceId(record.studentId)) || record.studentId;
+    if (record.kind === "absent") students.delete(studentId);
+    else students.set(studentId, {
+      studentId,
       name: record.studentName || record.studentId,
       time: clockFromStamp(attendanceStamp(new Date(record.at))),
     });
@@ -473,7 +484,8 @@ async function publishAttendance() {
 }
 
 async function acceptPresent(student, at = new Date().toISOString()) {
-  const id = canonicalStudentId(student?.studentId);
+  const originalId = canonicalPrintStudentId(student?.studentId);
+  const id = boutySourceLinks(roster).get(normalizeBoutySourceId(originalId)) || originalId;
   if (!id) return { op: "missing-id" };
   const owner = boutyOwner;
   if (!owner || boutySigningOut) throw new Error("Bouty: sign in to record attendance.");
@@ -787,10 +799,11 @@ async function runLoop(config, gen) {
   }
 }
 
-async function ensureRoster(config) {
+async function ensureRoster(config, profiles = roster) {
   try {
     const index = await loadIndex(config.fingerprintDir);
-    await writeLog(config.fingerprintDir, index);
+    if (migrateBoutyPrintLinks(index, profiles)) await saveIndex(config.fingerprintDir, index);
+    else await writeLog(config.fingerprintDir, index);
   } catch (err) {
     console.error(err);
   }
@@ -825,7 +838,7 @@ async function startLoop() {
     return;
   }
   currentConfig = config;
-  await ensureRoster(config);
+  await exclusive(() => ensureRoster(config));
   publish({
     phase: "ready",
     headline: "Place a finger",
@@ -876,7 +889,7 @@ async function listTemplateNames(config) {
 
 /** Write each body to the next free template name. Older prints for this student stay. */
 async function writeBatch(config, student, bodies) {
-  const primary = templateFileForStudent(student);
+  const primary = enrollmentTemplateFile(student);
   const files = planBatchFiles(primary, await listTemplateNames(config), bodies.length);
   for (let i = 0; i < files.length; i += 1) {
     await writeFile(templatePath(config.fingerprintDir, files[i]), bodies[i]);
@@ -1156,16 +1169,16 @@ function publishPrintsDeleted() {
 
 async function forgetLocalPrint(config, student, files) {
   printsEpoch += 1;
-  const id = canonicalStudentId(student.studentId);
+  const id = canonicalPrintStudentId(student.studentId);
   for (const file of files) await rm(templatePath(config.fingerprintDir, file), { force: true });
   const index = await loadIndex(config.fingerprintDir);
   await saveIndex(config.fingerprintDir, dropPrintEnrollment(index, student, files));
   for (const cachedStudent of Object.values(cached)) {
-    const sameId = id && canonicalStudentId(cachedStudent.studentId) === id;
+    const sameId = id && canonicalPrintStudentId(cachedStudent.studentId) === id;
     const sameName =
       !id &&
       !String(student.key || "").startsWith("file:") &&
-      !canonicalStudentId(cachedStudent.studentId) &&
+      !canonicalPrintStudentId(cachedStudent.studentId) &&
       student.studentName &&
       String(cachedStudent.studentName || "").trim().toLowerCase() === student.studentName.trim().toLowerCase();
     const pointed = files.some((file) => file.toLowerCase() === String(cachedStudent.templateFile || "").toLowerCase());
@@ -1308,12 +1321,10 @@ function registerIpc() {
           return saved;
         })
         : saved;
-      const index = await loadIndex(config.fingerprintDir);
       if (version !== boutyAccountVersion || boutySigningOut) return { error: "Bouty account changed." };
-      const candidates = roster ? roster.map((entry) => entry.id === profile.id ? profile : entry) : [profile];
-      const choice = boutyStudentChoices(candidates, index.students).find((entry) => entry.siteId === profile.id);
-      if (choice) boutyNames.set(choice.studentId, profile.studentName);
-      return { studentName: profile.studentName, studentId: choice?.studentId || "", fields: profile.fields };
+      const studentId = `bouty:${profile.id}`;
+      boutyNames.set(studentId, profile.studentName);
+      return { studentName: profile.studentName, studentId, studentNumber: profile.studentNumber || String(profile.id), fields: profile.fields };
     } catch (error) {
       return { error: error?.message?.startsWith("Bouty") ? error.message : "Bouty student information is unavailable." };
     }
@@ -1339,7 +1350,7 @@ function registerIpc() {
         const key = `bouty:${student.siteId}`;
         cached[key] = student;
         const printCount = studentTemplateNames(student, names).length;
-        return { key, studentId: student.studentId, studentName: student.studentName, printCount };
+        return { key, studentId: numbers.get(student.siteId) || String(student.siteId), studentName: student.studentName, printCount };
       }) };
     } catch {
       return { students: [], error: "Connect to Bouty to save the student list for offline use." };
@@ -1506,7 +1517,7 @@ function registerIpc() {
     const at = new Date().toISOString();
     try {
       const result = await exclusive(() => acceptPresent(student, at));
-      if (result?.op === "missing-id") return { ok: false, error: "This student has no Marif id." };
+      if (result?.op === "missing-id") return { ok: false, error: "This student has no Bouty ID." };
       const match = lastMatchOf(student, at);
       publish({ lastMatch: { ...match, studentName: student.studentName || match.studentName,
         fields: student.fields || match.fields, profileStatus: "" } });

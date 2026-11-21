@@ -42,7 +42,7 @@ export function nextSampleFile(primaryFile, existingNames) {
 
 /** Local names for one student: the primary file and every s-name--N extra. Other students stay out. */
 export function studentTemplateNames(student, existingNames) {
-  const primary = String(student?.primaryFile || templateFileForStudent(student) || "");
+  const primary = String(student?.primaryFile || enrollmentTemplateFile(student));
   if (!/^([st]-).+\.txt$/i.test(primary) || path.basename(primary) !== primary) return [];
   const stem = templateStem(primary);
   const extra = `${stem}--`;
@@ -52,6 +52,10 @@ export function studentTemplateNames(student, existingNames) {
     const sid = templateStem(file);
     return sid === stem || sid.startsWith(extra);
   });
+}
+
+export function enrollmentTemplateFile(student) {
+  return (boutyProfileId(student?.studentId) && student.templateFile) || templateFileForStudent(student);
 }
 
 /** Filenames for scans saved together, in order. The first free name is the primary template. */
@@ -376,6 +380,17 @@ export function canonicalStudentId(value) {
   const text = String(value ?? "").replace(/\u00a0/g, " ").trim().replace(/\s+/g, " ");
   if (!/^\d+(?: \d+)*$/.test(text)) return "";
   return text;
+}
+
+export function boutyProfileId(value) {
+  const match = /^bouty:([1-9]\d*)$/.exec(String(value ?? ""));
+  const id = Number(match?.[1]);
+  return Number.isSafeInteger(id) ? id : null;
+}
+
+export function canonicalPrintStudentId(value) {
+  const id = boutyProfileId(value);
+  return id ? `bouty:${id}` : canonicalStudentId(value);
 }
 
 export function rosterColumns(header) {
@@ -714,8 +729,8 @@ export function attendanceListed(people, person) {
 /** The Marif id selects the person. The sheet row is only used when that id is missing. */
 export function personOnList(people, wanted = {}) {
   const list = people || [];
-  const id = canonicalStudentId(wanted.studentId);
-  if (id) return list.find((item) => canonicalStudentId(item.studentId) === id) || null;
+  const id = canonicalPrintStudentId(wanted.studentId);
+  if (id) return list.find((item) => canonicalPrintStudentId(item.studentId) === id) || null;
   const row = Number(wanted.rowNumber) || 0;
   if (!row) return null;
   return list.find((item) => Number(item.rowNumber) === row) || null;
@@ -991,7 +1006,7 @@ export function parseFingerprintSheet(rows) {
   const prints = [];
   for (let i = headerLike ? 1 : 0; i < list.length; i++) {
     const row = list[i] || [];
-    const studentId = canonicalStudentId(row[layout.id]);
+    const studentId = canonicalPrintStudentId(row[layout.id]);
     const template = String(row[layout.template] ?? "");
     if (!studentId || !template.trim()) continue;
     prints.push({ studentId, template });
@@ -1105,9 +1120,9 @@ export function studentsWithPrints(indexStudents, localNames, sheetRows) {
   const people = new Map();
 
   const ensure = (student, primaryFile) => {
-    const id = canonicalStudentId(student?.studentId);
+    const id = canonicalPrintStudentId(student?.studentId);
     const name = String(student?.studentName || "").trim();
-    const primary = primaryFile || templateFileForStudent({ studentId: id, studentName: name });
+    const primary = primaryFile || enrollmentTemplateFile(student);
     const key = id ? studentKey({ studentId: id }) : primaryFile ? `file:${templateStem(primary)}` : studentKey({ studentName: name });
     if (!key || key === "name:") return null;
     let row = people.get(key);
