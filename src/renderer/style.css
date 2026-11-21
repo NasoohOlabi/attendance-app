@@ -760,7 +760,7 @@ label { font-size: 13px; color: var(--muted); }
   display: block;
   flex: none;
 }
-input[type="text"], input[type="search"], input[type="password"], select, textarea {
+input[type="text"], input[type="search"], input[type="password"], input[type="tel"], select, textarea {
   width: 100%;
   border: 1px solid var(--line);
   background: var(--card);
@@ -872,6 +872,34 @@ input[type="text"], input[type="search"], input[type="password"], select, textar
 .confirm-card .actions .secondary,
 .confirm-card .actions .danger { min-width: 108px; }
 .confirm-card .danger { align-self: auto; }
+
+#last:has(#phone-warning:not([hidden])) { border-inline-start-color: #c9001a; }
+#phone-warning {
+  margin-block-start: 10px;
+  padding: 6px 10px;
+  background: #c9001a;
+  color: #fff;
+  font-weight: 700;
+  text-align: start;
+}
+#phone-prompt {
+  position: fixed;
+  z-index: 3;
+  inset-inline-end: 20px;
+  inset-block-end: 64px;
+  display: grid;
+  gap: 8px;
+  width: min(320px, calc(100vw - 40px));
+  padding: 16px;
+  border: 2px solid #c9001a;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 6px 24px #221e1933;
+  -webkit-app-region: no-drag;
+}
+#phone-prompt-title, #phone-error { color: #a60016; }
+#phone-prompt p { margin: 0; overflow-wrap: anywhere; }
+#phone-prompt .actions { justify-content: flex-end; }
 .primary:hover { background: var(--green-dark); }
 .secondary { background: transparent; border-color: var(--line); }
 .secondary[aria-pressed="true"] {

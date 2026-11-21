@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld("attendance", {
   filter: (query) => ipcRenderer.invoke("filter", query),
   boutyRoster: (input) => ipcRenderer.invoke("boutyRoster", input),
   boutyStudent: (input) => ipcRenderer.invoke("boutyStudent", input),
+  saveMissingPhone: (scanId, phone) => ipcRenderer.invoke("saveMissingPhone", scanId, phone),
   assign: (key) => ipcRenderer.invoke("assign", key),
   addMoreScans: () => ipcRenderer.invoke("addMoreScans"),
   rescan: () => ipcRenderer.invoke("rescan"),

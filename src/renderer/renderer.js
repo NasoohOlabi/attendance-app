@@ -19,6 +19,16 @@ const lastName = document.querySelector("#last-name");
 const lastMeta = document.querySelector("#last-meta");
 const lastChips = document.querySelector("#last-chips");
 const lastFields = document.querySelector("#last-fields");
+const phoneWarning = document.querySelector("#phone-warning");
+const phonePrompt = document.querySelector("#phone-prompt");
+const phoneNumber = document.querySelector("#phone-number");
+const phoneError = document.querySelector("#phone-error");
+const phoneSkip = document.querySelector("#phone-skip");
+const phoneSave = document.querySelector("#phone-save");
+const phoneStudent = document.querySelector("#phone-student");
+let phoneScan = null;
+let phoneSkipped = false;
+let phoneSaving = false;
 const todayCount = document.querySelector("#today-count");
 const todayEmpty = document.querySelector("#today-empty");
 const todayList = document.querySelector("#today-list");
@@ -557,6 +567,61 @@ function renderProfile(fields, chips = lastChips, lines = lastFields) {
   lines.hidden = lines.childElementCount === 0;
 }
 
+function syncPhoneControls() {
+  phoneNumber.disabled = phoneSaving;
+  phoneSkip.disabled = phoneSaving;
+  phoneSave.disabled = phoneSaving || !phoneNumber.value.trim();
+}
+
+function renderPhoneReminder(match) {
+  const scan = match?.phoneMissing ? match.scanId : null;
+  if (scan !== phoneScan) {
+    phoneScan = scan;
+    phoneSkipped = false;
+    phoneSaving = false;
+    phoneNumber.value = "";
+    phoneError.hidden = true;
+    syncPhoneControls();
+  }
+  phoneStudent.textContent = scan ? match.studentName : "";
+  phoneWarning.hidden = !scan;
+  phonePrompt.hidden = !scan || phoneSkipped;
+  phoneWarning.setAttribute("aria-expanded", String(!phonePrompt.hidden));
+}
+
+phoneWarning.addEventListener("click", () => {
+  phoneSkipped = false;
+  renderPhoneReminder(lastState.lastMatch);
+  phoneNumber.focus();
+});
+phoneSkip.addEventListener("click", () => {
+  phoneSkipped = true;
+  phoneNumber.value = "";
+  phoneError.hidden = true;
+  syncPhoneControls();
+  renderPhoneReminder(lastState.lastMatch);
+  phoneWarning.focus();
+});
+phoneNumber.addEventListener("input", syncPhoneControls);
+phonePrompt.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const scan = phoneScan;
+  if (!scan || phoneSaving || phoneSave.disabled) return;
+  phoneSaving = true;
+  phoneError.hidden = true;
+  syncPhoneControls();
+  const failed = "Could not save the phone number. Try again.";
+  const result = await window.attendance.saveMissingPhone(scan, phoneNumber.value).catch(() => ({ error: failed }));
+  if (phoneScan !== scan) return;
+  phoneSaving = false;
+  syncPhoneControls();
+  if (!result?.ok) {
+    phoneError.textContent = translate(result?.error || failed);
+    phoneError.hidden = false;
+    phoneNumber.focus();
+  }
+});
+
 function render(state) {
   if (lastState && Boolean(lastState.testMode) !== Boolean(state.testMode)) {
     closeConfirm(false);
@@ -572,6 +637,7 @@ function render(state) {
     todayKey = "";
   }
   lastState = state;
+  renderPhoneReminder(state.lastMatch);
   // Keep the installed build visible even when settings was already open.
   const version = document.querySelector("#app-version");
   if (version) version.textContent = state.appVersion || state.update?.version || "—";

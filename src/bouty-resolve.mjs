@@ -92,7 +92,30 @@ export function boutyStudentChoices(profiles, localStudents) {
 /** A slower lookup must never replace the card for a later scan. */
 export function applyBoutyProfile(match, at, studentId, profile, destination) {
   if (destination !== "bouty" || match?.at !== at || canonicalPrintStudentId(match.studentId) !== canonicalPrintStudentId(studentId)) return null;
-  return { ...match, studentName: profile.studentName, fields: profile.fields, profileStatus: "" };
+  return { ...match, studentName: profile.studentName, fields: profile.fields, profileStatus: "",
+    profileId: profile.id, phoneMissing: Boolean(match.scanId && profile.phoneMissing) };
+}
+
+const studentPhoneLabel = "هاتف الطالب";
+const parentPhoneLabels = ["هاتف الأب", "هاتف الأم", "هاتف المنزل"];
+
+function recordedPhone(value) {
+  return /[\d٠-٩۰-۹xX*•]{3}/.test(String(value ?? "").replace(/[\s().-]/g, ""));
+}
+
+export function normalizeContactPhone(value) {
+  if (typeof value !== "string" || value.length > 40) return "";
+  const digits = "٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹";
+  const phone = value.replace(/[٠-٩۰-۹]/g, (digit) => String(digits.indexOf(digit) % 10)).replace(/[\s().-]/g, "");
+  const international = phone.replace(/^00/, "+");
+  if (international.startsWith("+")) return /^\+[1-9]\d{6,14}$/.test(international) ? international : "";
+  // Bouty's entry field defaults to Syria when a country code is omitted.
+  return /^0?[1-9]\d{6,11}$/.test(phone) ? `+963${phone.replace(/^0/, "")}` : "";
+}
+
+export function withStudentPhone(profile, phone) {
+  return { ...profile, phoneMissing: false, fields: [...profile.fields.filter((field) => field.label !== studentPhoneLabel),
+    { label: studentPhoneLabel, value: phone, kind: "phone" }] };
 }
 
 function siteProfile(data, html, studentNumber = "") {
@@ -113,14 +136,17 @@ function siteProfile(data, html, studentNumber = "") {
   add("تاريخ الميلاد", data.birth_date);
   add("ولي الأمر", optionText("student-parent", data.parent_id), "line");
   add("المدرسة", data.school_name, "line");
-  add("هاتف الطالب", data.student_phone, "phone");
+  const hasStudentPhone = recordedPhone(data.student_phone);
+  if (hasStudentPhone) add(studentPhoneLabel, data.student_phone, "phone");
   add("الجزء الحالي", data.quran_current_juz_number);
   add("الأجزاء المحفوظة سابقاً", data.external_memorized_juz_input, "line");
   add("الجنس", ({ male: "ذكر", female: "أنثى" })[data.gender] || data.gender);
   add("الحالة", ({ active: "نشط", inactive: "غير نشط", graduated: "متخرج", blocked: "موقوف" })[data.status] || data.status);
   add("تاريخ الانضمام", data.joined_at);
   add("ملاحظات", data.notes, "line");
-  return { studentName: [data.first_name, data.last_name].filter(Boolean).join(" ").trim(), fields };
+  const parentId = Number(data.parent_id) || null;
+  return { studentName: [data.first_name, data.last_name].filter(Boolean).join(" ").trim(), fields, parentId,
+    phoneMissing: !hasStudentPhone && !parentId };
 }
 
 /** Resolves only exact source IDs and an active enrolment in the site's default course. */
@@ -188,6 +214,47 @@ export function createBoutyResolver({ origin, page, csrf }) {
     const ctx = await load("/students", "students.index");
     const number = tableRows(document(ctx.html)).get(id)?.[1] || studentNumber;
     return editStudent(ctx, id, number);
+  }
+  async function withParentPhones(profile) {
+    if (!profile.parentId) return profile;
+    const ctx = await load("/parents", "parents.index");
+    const action = new RegExp(`^(?:openChildrenModal|viewAccount|edit)\\(${profile.parentId}\\)$`);
+    for (let pageNumber = 1; ; pageNumber += 1) {
+      const tree = document(ctx.html);
+      for (const table of walk(tree, (node) => node.tagName === "table")) {
+        const headers = walk(table, (node) => node.tagName === "th").map(plainText);
+        if (!parentPhoneLabels.slice(0, 2).every((label) => headers.includes(label))) continue;
+        const row = walk(table, (node) => node.tagName === "tr").find((entry) =>
+          walk(entry, (node) => action.test(attr(node, "wire:click"))).length);
+        if (!row) continue;
+        const cells = walk(row, (node) => node.tagName === "td").map(plainText);
+        if (cells.length !== headers.length) throw new Error("Bouty parent information is unavailable.");
+        const phones = parentPhoneLabels.map((label) => ({ label, value: cells[headers.indexOf(label)], kind: "phone" }))
+          .filter((field) => recordedPhone(field.value));
+        return { ...profile, fields: [...profile.fields, ...phones],
+          phoneMissing: !phones.length && !profile.fields.some((field) => field.kind === "phone") };
+      }
+      if (!hasNextPage(tree)) throw new Error("Bouty parent information is unavailable.");
+      await call(ctx, "gotoPage", {}, [pageNumber + 1, "page"]);
+    }
+  }
+  async function withContactPhones(profile) {
+    try { return await withParentPhones(profile); }
+    catch (error) {
+      if (error?.code === "BOUTY_SESSION_EXPIRED") throw error;
+      return profile;
+    }
+  }
+  async function saveMissingPhone(id, phone, studentNumber) {
+    const ctx = await load("/students", "students.index");
+    const before = await withParentPhones(await editStudent(ctx, id, studentNumber));
+    if (!before.phoneMissing) return before;
+    const form = walk(document(ctx.html), (node) => node.tagName === "form" && attr(node, "wire:submit") === "save")[0];
+    if (!form) throw new Error("Bouty student editing is unavailable.");
+    await call(ctx, "save", { student_phone: phone });
+    const saved = await studentById(id, studentNumber);
+    if (!saved.fields.some((field) => field.label === studentPhoneLabel)) throw new Error("Bouty did not confirm the phone number.");
+    return { ...before, phoneMissing: false, fields: [...before.fields, ...saved.fields.filter((field) => field.label === studentPhoneLabel)] };
   }
   async function student({ studentId, studentName, studentNumber }) {
     const id = boutyProfileId(studentId);
@@ -281,10 +348,11 @@ export function createBoutyResolver({ origin, page, csrf }) {
     } catch { /* The profile remains useful if no unique active enrolment is available. */ }
     return profile;
   }
-  resolve.student = async (input) => withEnrollment(await student(input));
+  resolve.student = async (input) => withEnrollment(await withContactPhones(await student(input)));
   resolve.studentById = async (id, studentNumber) => withEnrollment(await studentById(id, studentNumber));
   resolve.roster = roster;
   resolve.rosterProfiles = (pageNumber) => roster("", pageNumber, true);
   resolve.studentsFor = studentsFor;
+  resolve.saveMissingPhone = saveMissingPhone;
   return resolve;
 }
