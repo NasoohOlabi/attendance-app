@@ -87,8 +87,20 @@
             <p class="label" data-i18n="Student details">Student details</p>
             <strong id="last-name" dir="auto"></strong>
             <p id="last-meta" class="profile-meta"></p>
+            <button id="phone-warning" type="button" aria-controls="phone-prompt" aria-expanded="false" data-i18n="Phone number is missing" hidden>Phone number is missing</button>
             <div id="last-chips" class="profile-chips" hidden></div>
             <dl id="last-fields" class="profile-fields" hidden></dl>
+            <form id="phone-prompt" role="dialog" aria-labelledby="phone-prompt-title" hidden>
+              <strong id="phone-prompt-title" data-i18n="Phone number is missing">Phone number is missing</strong>
+              <p id="phone-student" dir="auto"></p>
+              <label for="phone-number" data-i18n="Contact phone number">Contact phone number</label>
+              <input id="phone-number" type="tel" dir="ltr" maxlength="40" autocomplete="off">
+              <p id="phone-error" role="alert" hidden></p>
+              <div class="actions">
+                <button id="phone-skip" type="button" class="secondary" data-i18n="Skip">Skip</button>
+                <button id="phone-save" type="submit" class="primary" data-i18n="Save number" disabled>Save number</button>
+              </div>
+            </form>
           </article>
           <ol id="trace" class="log"></ol>
         </div>

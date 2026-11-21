@@ -8,7 +8,7 @@ import { createBoutyClient } from "../bouty.mjs";
 import { createBoutyCredentials, createBoutyQueue, createBoutyRosterCache, parseBoutyMapping } from "../bouty-storage.mjs";
 import { createTestWorkspace, discardTestWorkspace } from "../test-mode.mjs";
 import { createBoutySync, enqueueBoutyAttendance } from "../bouty-sync.mjs";
-import { applyBoutyProfile, boutySourceLinks, boutyStudentChoices, migrateBoutyPrintLinks, normalizeBoutySourceId } from "../bouty-resolve.mjs";
+import { applyBoutyProfile, boutySourceLinks, boutyStudentChoices, migrateBoutyPrintLinks, normalizeBoutySourceId, normalizeContactPhone, withStudentPhone } from "../bouty-resolve.mjs";
 import { legacyUserDataPath, loadConfig, scannerExeInResources, updateChannelPreferencePath } from "../config.mjs";
 import { createCredentialStore, credentialFile } from "../credentials.mjs";
 import { createGoogle } from "../google.mjs";
@@ -16,7 +16,7 @@ import { appLogFile, startAppLog } from "../log.mjs";
 import { backupPrints, readPrintBackup } from "../print-backup.mjs";
 import { updaterChannel, updaterErrorDetails, updaterInfoDetails, updaterShouldOffer } from "../update.mjs";
 import { appendScanTrace, beginScanAttempt, mergeCapturedFiles, planScanRetry, runIdentify, SCAN_OUTAGE_MESSAGE, SCAN_RETRY_PAUSE_MS } from "../scan.mjs";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   attendanceStamp, boutyProfileId, canonicalPrintStudentId, captureScreen, clearFingerprints, clockFromStamp,
   dropPrintEnrollment, fuzzyStudents, loadIndex, outboxDay, pendingPath, personOnList,
@@ -152,26 +152,62 @@ function refreshRoster() {
   return promise;
 }
 
-function loadBoutyProfile(student, at) {
+function loadBoutyProfile(student, { at, scanId }) {
   const id = canonicalPrintStudentId(student.studentId);
   if (!id) return;
+  const version = boutyAccountVersion;
   const key = normalizeBoutySourceId(id);
   const link = boutySourceLinks(roster).get(key);
   const profileId = boutyProfileId(link || id);
   const saved = roster?.find((profile) => profile.id === profileId);
   const show = (profile) => {
-      boutyNames.set(id, profile.studentName);
-      const match = applyBoutyProfile(state.lastMatch, at, id, profile, "bouty");
-      if (match) publish({ lastMatch: match, present: shownPresent() });
+    if (version !== boutyAccountVersion || !boutyEnabled) return;
+    boutyNames.set(id, profile.studentName);
+    if (state.lastMatch?.scanId !== scanId) return;
+    const testPhone = testSession?.phones.get(profile.id);
+    const match = applyBoutyProfile(state.lastMatch, at, id, testPhone ? withStudentPhone(profile, testPhone) : profile, "bouty");
+    if (match) publish({ lastMatch: match, present: shownPresent() });
   };
-  if (saved) show(saved);
-  if (!net.isOnline() && saved) return;
+  if (saved && !net.isOnline()) return show(saved);
+  if (saved) show({ ...saved, phoneMissing: false });
   void withBoutyLookup((api) => api.student({ studentId: link || id, studentName: student.studentName || "", studentNumber: saved?.studentNumber }))
     .then(show).catch(() => {
-      if (saved) return;
-      if (!boutyEnabled || state.lastMatch?.at !== at || canonicalPrintStudentId(state.lastMatch?.studentId) !== id) return;
+      if (saved) return show(saved);
+      if (version !== boutyAccountVersion || !boutyEnabled || state.lastMatch?.scanId !== scanId) return;
       publish({ lastMatch: { ...state.lastMatch, profileStatus: "Bouty student information is unavailable." } });
     });
+}
+
+async function saveMissingPhone(scanId, value) {
+  const stale = "Scan this student again to save a phone number.";
+  const match = state.lastMatch;
+  if (!scanId || match?.scanId !== scanId || !match.phoneMissing || !match.profileId) return { ok: false, error: stale };
+  const phone = normalizeContactPhone(value);
+  if (!phone) return { ok: false, error: "Enter a valid phone number." };
+  try {
+    const id = match.profileId;
+    if (testSession) {
+      testSession.phones.set(id, phone);
+      publish({ lastMatch: withStudentPhone(match, phone) });
+      return { ok: true };
+    }
+    return await withBoutyLookup(async (api) => {
+      if (state.lastMatch?.scanId !== scanId || !state.lastMatch.phoneMissing) return { ok: false, error: stale };
+      const previous = roster?.find((profile) => profile.id === id);
+      const profile = await api.saveMissingPhone(id, phone, previous?.studentNumber);
+      const phones = profile.fields.filter((field) => field.kind === "phone");
+      const update = (entry) => ({ ...entry, phoneMissing: false,
+        fields: [...entry.fields.filter((field) => field.kind !== "phone"), ...phones] });
+      if (previous) {
+        roster = roster.map((entry) => entry.id === id ? update(entry) : entry);
+        await rosterCache.save(boutyOwner, roster).catch(() => {});
+      }
+      if (state.lastMatch?.scanId === scanId) publish({ lastMatch: update(state.lastMatch) });
+      return { ok: true };
+    });
+  } catch {
+    return { ok: false, error: "Could not save the phone number. Try again." };
+  }
 }
 
 function boutyPublic() {
@@ -462,8 +498,9 @@ async function saveUpdateChannelPreference(channel) {
   await rename(temp, file);
 }
 
-function lastMatchOf(student, at) {
+function lastMatchOf(student, at, scanned = false) {
   return { studentName: "", studentId: student?.studentId || "", at, fields: [],
+    ...(scanned ? { scanId: randomUUID() } : {}),
     profileStatus: "Loading Bouty student information…" };
 }
 
@@ -704,12 +741,13 @@ async function handleCapture(config, result, body, gen, scanImage) {
     const extra = markDetail(plan);
     const detail = [`Matched ${who}`, extra].filter(Boolean).join(" ");
     const matchedAt = new Date().toISOString();
+    const match = lastMatchOf(student, matchedAt, true);
     publish(
       {
         phase: pause ? state.phase : "ready",
         headline: pause ? state.headline : "Place a finger",
         detail: pause ? state.detail : detail,
-        lastMatch: lastMatchOf(student, matchedAt),
+        lastMatch: match,
         scanImage,
         scanImages: [],
         error: plan.error || (plan.op === "missing-id" ? extra : ""),
@@ -717,7 +755,7 @@ async function handleCapture(config, result, body, gen, scanImage) {
       },
       gen,
     );
-    if (boutyEnabled) loadBoutyProfile(student, matchedAt);
+    if (boutyEnabled) loadBoutyProfile(student, match);
     return;
   }
   if (!decision.picker) {
@@ -1127,7 +1165,7 @@ async function assignStudent(key) {
   const linked = {
     phase: "ready",
     headline: "Place a finger",
-    lastMatch: lastMatchOf(draft, draft.capturedAt),
+    lastMatch: lastMatchOf(draft, draft.capturedAt, true),
   };
   const plan = await acceptPresent(draft).catch((error) => ({ error: error.message }));
   const extra = markDetail(plan) || "Saved on this computer.";
@@ -1146,7 +1184,7 @@ async function assignStudent(key) {
     present: shownPresent(),
     ...(hadGallery ? { scanImage: scanImageUrl() } : {}),
   });
-  if (boutyEnabled) loadBoutyProfile(draft, draft.capturedAt);
+  if (boutyEnabled) loadBoutyProfile(draft, linked.lastMatch);
   console.log(`linked ${who} file=${draft.templateFile} scans=${savedCount}`);
 }
 
@@ -1324,6 +1362,7 @@ async function changeTestMode(enabled) {
       testSession = {
         root: workspace.root,
         queue: createBoutyQueue(workspace.queueFile),
+        phones: new Map(),
         live: { config: currentConfig, roster, match: state.lastMatch, image: allowedImage, trace: state.trace, names: new Map(boutyNames) },
       };
       currentConfig = { ...currentConfig, fingerprintDir: workspace.fingerprintDir, fingerprintSheetGid: null };
@@ -1432,6 +1471,7 @@ function registerIpc() {
     finally { boutySigningOut = false; }
   });
   handle("updateAction", () => updateAction());
+  handle("saveMissingPhone", (_event, scanId, phone) => saveMissingPhone(scanId, phone));
   handle("boutyRoster", async (_event, { query, page = 1, refresh } = {}) => {
     if (!boutyOwner || boutySigningOut) return { error: "Bouty: sign in to look up students." };
     let notice = "";

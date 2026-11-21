@@ -241,7 +241,7 @@ test("Bouty resolves the exact source ID, active enrolment, day and group withou
   };
   const resolve = createBoutyResolver({ origin, page, csrf: () => "token" });
   assert.deepEqual(await resolve.student({ studentId: "001", studentName: "Old Name" }), {
-    id: 12, studentNumber: "7002", sourceIds: ["001"], studentName: "Same Name", fields: [
+    id: 12, studentNumber: "7002", sourceIds: ["001"], studentName: "Same Name", parentId: null, phoneMissing: true, fields: [
       { label: "رقم الطالب", value: "7002", kind: "chip" },
       { label: "المدرسة", value: "From Bouty", kind: "line" },
       { label: "ملاحظات", value: "معرف المصدر: 001", kind: "line" },

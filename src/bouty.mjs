@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { createBoutyResolver } from "./bouty-resolve.mjs";
+import { createBoutyResolver, normalizeContactPhone } from "./bouty-resolve.mjs";
 
 // This endpoint is the one used by the site's manual attendance controls.
 const ORIGIN = "https://albouty.saas.alkheir-platform.com";
@@ -98,6 +98,12 @@ export function createBoutyClient(fetch) {
     async studentById(id, studentNumber) {
       if (!csrf || !userId) throw new Error("Sign in to Bouty first.");
       return resolve.studentById(positiveInteger(id, "student ID"), studentNumber);
+    },
+    async saveMissingPhone(id, value, studentNumber) {
+      if (!csrf || !userId) throw new Error("Sign in to Bouty first.");
+      const phone = normalizeContactPhone(value);
+      if (!phone) throw new Error("Enter a valid phone number.");
+      return resolve.saveMissingPhone(positiveInteger(id, "student ID"), phone, studentNumber);
     },
     async mark({ dayId, enrollmentId, statusId, changedAt, operationId }) {
       if (!csrf || !userId) throw new Error("Sign in to Bouty first.");

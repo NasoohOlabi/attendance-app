@@ -13,10 +13,13 @@ export function mockBouty(session) {
     '<table><tr><td>1</td><td>Website Student</td><td>Website Group</td><td>Winter</td><td><button wire:click="edit(31)"></button></td></tr></table>');
   const attendanceDay = html("attendance.index", { course_id: "1" },
     '<select id="attendance-day-course"><option value="1">Winter</option></select><table><tr><td>12-10-2026</td><td>Winter</td><td><a href="/attendance/days/students/22">open</a></td></tr></table>');
+  const studentForm = '<form wire:submit="save"></form>';
   globalThis.boutyTestName = "Website Student";
   globalThis.boutyTestAttendance = [];
   globalThis.boutyTestLogins = 0;
   globalThis.boutyTestLogouts = 0;
+  globalThis.boutyTestStudentPhones = { 9: "2025550100", 10: "2025550101" };
+  globalThis.boutyTestPhoneWrites = [];
   let connected = false;
   session.fromPartition("bouty-students").fetch = async (url, opts = {}) => {
     if (new URL(url).origin !== origin) throw new Error("Unexpected synthetic Bouty origin");
@@ -44,6 +47,12 @@ export function mockBouty(session) {
     }
     if (pathname === "/attendance") return new Response('<meta name="csrf-token" content="token"><body data-current-user-id="1">' + attendanceDay);
     if (pathname === "/students") return new Response(roster());
+    if (pathname === "/parents") {
+      const parentPhone = globalThis.boutyTestParentPhone || "-";
+      return new Response(html("parents.index", {}, `<table><thead><tr><th>هاتف الأب</th><th>هاتف الأم</th><th>الإجراءات</th></tr></thead>
+        <tbody><tr><td>2025550199</td><td>-</td><td><button wire:click="openChildrenModal(72)"></button></td></tr>
+        <tr><td>-</td><td>${parentPhone}</td><td><button wire:click="openChildrenModal(71)"></button></td></tr></tbody></table>`));
+    }
     if (pathname === "/enrollments") return new Response(enrollments);
     if (pathname === "/attendance/days/students/22") return new Response('<a href="/student-attendance/groups/8">group</a>');
     if (pathname === "/student-attendance/groups/8") {
@@ -63,12 +72,19 @@ export function mockBouty(session) {
           ? globalThis.boutyTestProfileName || ["Website", "Student"]
           : ["Another", "Student"];
         const sourceId = action.params[0] === 9 ? 5 : 6;
-        Object.assign(state.data, { editingId: action.params[0], first_name, last_name, notes: `معرف المصدر: ${sourceId}`, school_name: "Website School" });
+        Object.assign(state.data, { editingId: action.params[0], first_name, last_name, notes: `معرف المصدر: ${sourceId}`, school_name: "Website School",
+          student_phone: globalThis.boutyTestStudentPhones[action.params[0]], parent_id: action.params[0] === 9 && globalThis.boutyTestLinkedParent ? 71 : null });
+      }
+      if (state.memo.name === "students.index" && action?.method === "save") {
+        if (globalThis.boutyTestRejectPhone) return new Response("", { status: 422 });
+        if (Object.keys(request.updates).join() !== "student_phone" || !state.data.editingId) throw new Error("Unexpected student phone update");
+        globalThis.boutyTestStudentPhones[state.data.editingId] = request.updates.student_phone;
+        globalThis.boutyTestPhoneWrites.push({ id: state.data.editingId, phone: request.updates.student_phone });
       }
       if (state.memo.name === "enrollments.index" && action?.method === "edit") Object.assign(state.data, { student_id: 9, status: "active" });
       const rendered = state.memo.name === "students.index" ? roster(action?.method === "gotoPage" ? action.params[0] : 1, request.updates.search)
         : state.memo.name === "enrollments.index" ? enrollments : attendanceDay;
-      const body = { components: [{ snapshot: JSON.stringify(state), effects: { html: rendered } }] };
+      const body = { components: [{ snapshot: JSON.stringify(state), effects: { html: rendered + (state.memo.name === "students.index" && action?.method === "edit" ? studentForm : "") } }] };
       return new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
     }
     throw new Error(`Unexpected synthetic Bouty request: ${pathname}`);
