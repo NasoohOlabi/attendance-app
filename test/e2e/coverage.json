@@ -5,6 +5,7 @@
     "Bouty roster can refresh, open a profile, and mark attendance on the website",
     "Bouty sign-in persists and sign-out clears credentials across restart",
     "Browse places the chosen executable path in the scanner field",
+    "manual Bouty overrides use labelled fields and reject duplicate dates",
     "Done saves three kept scans as separate files locally",
     "Rescan replaces only the latest kept capture",
     "a hung fake capture respects both timeout windows before the host stops it",
