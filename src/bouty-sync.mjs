@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { canonicalStudentId } from "./store.mjs";
+import { canonicalPrintStudentId } from "./store.mjs";
 import { parseBoutyMapping } from "./bouty-storage.mjs";
+import { normalizeBoutySourceId } from "./bouty-resolve.mjs";
 
 function damascusDate(timestamp) {
   const date = new Date(timestamp);
@@ -10,7 +11,7 @@ function damascusDate(timestamp) {
 
 /** The caller supplies the current day's ID and explicit roster-to-enrolment mapping. */
 export function createBoutySync({ queue, credentials, client, settings, studentName = async () => "", onStatus = () => {},
-  withSession = (run) => run(client), accountKey = () => undefined }) {
+  withSession = (run) => run(client), accountKey = () => undefined, sourceLinks = () => new Map() }) {
   let running = null;
   let rerun = false;
   async function drain(api) {
@@ -21,20 +22,33 @@ export function createBoutySync({ queue, credentials, client, settings, studentN
     if (!account) { onStatus("Bouty: sign in to sync attendance."); return; }
     const config = await settings();
     const mapping = parseBoutyMapping(config.mapping);
+    const links = sourceLinks();
+    const migratedMapping = new Map();
+    for (const [legacyId, enrollmentId] of mapping) {
+      const id = links.get(normalizeBoutySourceId(legacyId));
+      if (id) migratedMapping.set(id, migratedMapping.has(id) ? null : enrollmentId);
+    }
     await api.login(account.username, account.password);
     const blocked = new Set();
     const unavailableDays = new Set();
     let warning = "";
     for (const item of items) {
       const date = damascusDate(item.at);
-      const key = `${date}:${item.studentId}`;
+      const link = links.get(normalizeBoutySourceId(item.studentId));
+      const studentId = link || item.studentId;
+      const key = `${date}:${studentId}`;
       if (blocked.has(key) || unavailableDays.has(date)) continue;
-      let enrollmentId = mapping.get(canonicalStudentId(item.studentId));
+      let enrollmentId = mapping.get(studentId) || mapping.get(item.studentId) || migratedMapping.get(studentId);
       let dayId = config.days?.[date];
       let statusId = item.kind === "absent" ? config.absentStatusId : config.presentStatusId;
       if ((!enrollmentId || !dayId || !statusId) && typeof api.resolve === "function") {
+        if (link === null) {
+          blocked.add(key);
+          warning = "Bouty student identity is missing or ambiguous.";
+          continue;
+        }
         try {
-          ({ enrollmentId, dayId, statusId } = await api.resolve({ studentId: item.studentId,
+          ({ enrollmentId, dayId, statusId } = await api.resolve({ studentId,
             studentName: item.studentName || await studentName(item.studentId), date, kind: item.kind }));
         } catch (error) {
           if (/^Bouty (has no attendance day|attendance day is missing or ambiguous)/.test(error?.message || "")) unavailableDays.add(date);
@@ -60,7 +74,7 @@ export function createBoutySync({ queue, credentials, client, settings, studentN
   }
   return {
     async enqueue(studentId, kind, at = new Date().toISOString(), name = "") {
-      const id = canonicalStudentId(studentId);
+      const id = canonicalPrintStudentId(studentId);
       if (!id || !["present", "absent"].includes(kind)) throw new Error("Invalid Bouty attendance.");
       damascusDate(at);
       await queue.enqueue({ id: randomUUID(), studentId: id, studentName: String(name || "").trim(), kind, at, owner: accountKey() });

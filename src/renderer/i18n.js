@@ -93,7 +93,6 @@ const AR = {
   "Searching Bouty…": "جارٍ البحث في البوطي…",
   "Type at least two characters to search Bouty.": "أدخل حرفين على الأقل للبحث في البوطي.",
   "Bouty: sign in to look up students.": "البوطي: سجّل الدخول للبحث عن الطلاب.",
-  "Bouty students need an unambiguous source ID.": "البوطي: يلزم معرّف مصدر واضح لكل طالب.",
   "Service account": "حساب الخدمة",
   "Import a service account": "استيراد حساب خدمة",
   "Choose the JSON key downloaded from Google Cloud. It will be encrypted for this Windows user.": "اختر ملف JSON الذي نزّلته من Google Cloud. سيُشفّر لحساب Windows الحالي.",
@@ -158,7 +157,7 @@ const AR = {
   "Mark without a finger?": "تسجيل بلا إصبع؟",
   "Mark present": "سجّل حاضر",
   "Already here today.": "حاضر اليوم.",
-  "This student has no Marif id.": "لا يوجد معرف لهذا الطالب.",
+  "This student has no Bouty ID.": "لا يوجد معرف البوطي لهذا الطالب.",
   "Today's cell is cleared. The time logged for today is removed. Other days stay.":
     "تُمسح خلية اليوم، ويُحذف وقت اليوم من السجل. بقية الأيام تبقى.",
   Remove: "إزالة",

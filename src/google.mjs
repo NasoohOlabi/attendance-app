@@ -368,13 +368,17 @@ export async function ensureDateColumn(client, spreadsheetId, sheetGid, date) {
 }
 
 /** Adds one row under the existing table. Does not change the header row. */
-export async function appendSheetRow(client, spreadsheetId, sheetGid, values) {
+export function appendSheetRow(client, spreadsheetId, sheetGid, row) {
+  return appendSheetRows(client, spreadsheetId, sheetGid, [row]);
+}
+
+export async function appendSheetRows(client, spreadsheetId, sheetGid, values) {
   const title = await sheetTitle(client, spreadsheetId, sheetGid);
   const range = encodeURIComponent(`${quoteTitle(title)}!A:ZZ`);
   await grequest(client, {
     url: `${sheetsUrl(spreadsheetId, `/values/${range}:append`)}?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
     method: "POST",
-    data: { values: [values] },
+    data: { values },
   });
   return title;
 }

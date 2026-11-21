@@ -1,5 +1,5 @@
 import { parse } from "parse5";
-import { canonicalStudentId } from "./store.mjs";
+import { boutyProfileId, canonicalPrintStudentId, canonicalStudentId } from "./store.mjs";
 
 function walk(node, test, out = []) {
   if (test(node)) out.push(node);
@@ -45,36 +45,53 @@ export function normalizeBoutySourceId(value) {
   return id.replace(/^0+(?=\d)/, "");
 }
 
-/** Only expose a site student when their source ID and local fingerprint identity are unambiguous. */
-export function boutyStudentChoices(profiles, localStudents) {
-  const candidates = (profiles || []).map((profile) => {
-    const ids = [...new Set((profile.sourceIds || []).map(canonicalStudentId).filter(Boolean))];
-    const normalized = [...new Set(ids.map(normalizeBoutySourceId))];
-    return { profile, ids, normalized };
-  }).filter((item) => item.profile.studentName && item.normalized.length === 1);
-  const counts = new Map();
-  for (const item of candidates) counts.set(item.normalized[0], (counts.get(item.normalized[0]) || 0) + 1);
-  const choices = [];
-  for (const item of candidates) {
-    const identity = item.normalized[0];
-    if (counts.get(identity) !== 1) continue;
-    const local = Object.values(localStudents || {}).filter((student) => {
-      const id = canonicalStudentId(student?.studentId);
-      return id && normalizeBoutySourceId(id) === identity;
-    });
-    if (local.length > 1) continue;
-    if (!local.length && identity.length > 10) continue;
-    const padded = identity.padStart(10, "0");
-    const rosterId = `${padded.slice(0, 2)} ${padded.slice(2, 4)} ${padded.slice(4, 7)} ${padded.slice(7)}`;
-    choices.push({ siteId: item.profile.id, studentId: local[0]?.studentId || rosterId, studentName: item.profile.studentName,
-      templateFile: local[0]?.templateFile || "", capturedAt: local[0]?.capturedAt || "" });
+/** A legacy ID can be migrated only when one profile claims it and that profile has one source ID. */
+export function boutySourceLinks(profiles) {
+  const claims = new Map();
+  for (const profile of profiles || []) {
+    const ids = new Set((profile.sourceIds || []).map(normalizeBoutySourceId).filter(Boolean));
+    for (const id of ids) {
+      const studentId = `bouty:${profile.id}`;
+      claims.set(id, !claims.has(id) && ids.size === 1 && boutyProfileId(studentId) ? studentId : null);
+    }
   }
-  return choices;
+  return claims;
+}
+
+export function migrateBoutyPrintLinks(index, profiles) {
+  const links = boutySourceLinks(profiles);
+  const candidates = new Map();
+  const occupied = new Set(Object.values(index.students).map((student) => student.studentId));
+  for (const [key, student] of Object.entries(index.students)) {
+    const id = links.get(normalizeBoutySourceId(student.studentId));
+    if (!id || occupied.has(id)) continue;
+    candidates.set(id, candidates.has(id) ? null : [key, student]);
+  }
+  let changed = false;
+  for (const [id, candidate] of candidates) {
+    if (!candidate || Object.hasOwn(index.students, id)) continue;
+    const [key, student] = candidate;
+    index.students[id] = { ...student, studentId: id };
+    delete index.students[key];
+    changed = true;
+  }
+  return changed;
+}
+
+export function boutyStudentChoices(profiles, localStudents) {
+  const local = new Map(Object.values(localStudents || {}).map((student) => [student.studentId, student]));
+  return (profiles || []).filter((profile) => profile.studentName && boutyProfileId(`bouty:${profile.id}`))
+    .map((profile) => {
+      const studentId = `bouty:${profile.id}`;
+      const saved = local.get(studentId);
+      return { siteId: profile.id, studentId, studentName: profile.studentName,
+        templateFile: saved?.templateFile || "", capturedAt: saved?.capturedAt || "" };
+    });
 }
 
 /** A slower lookup must never replace the card for a later scan. */
 export function applyBoutyProfile(match, at, studentId, profile, destination) {
-  if (destination !== "bouty" || match?.at !== at || canonicalStudentId(match.studentId) !== canonicalStudentId(studentId)) return null;
+  if (destination !== "bouty" || match?.at !== at || canonicalPrintStudentId(match.studentId) !== canonicalPrintStudentId(studentId)) return null;
   return { ...match, studentName: profile.studentName, fields: profile.fields, profileStatus: "" };
 }
 
@@ -167,7 +184,14 @@ export function createBoutyResolver({ origin, page, csrf }) {
     for (const [id, cells] of tableRows(tree)) profiles.push(await editStudent(ctx, id, cells[1] || ""));
     return profiles;
   }
-  async function student({ studentId, studentName }) {
+  async function studentById(id, studentNumber = "") {
+    const ctx = await load("/students", "students.index");
+    const number = tableRows(document(ctx.html)).get(id)?.[1] || studentNumber;
+    return editStudent(ctx, id, number);
+  }
+  async function student({ studentId, studentName, studentNumber }) {
+    const id = boutyProfileId(studentId);
+    if (id) return studentById(id, studentNumber);
     const wanted = normalizeBoutySourceId(studentId);
     if (!wanted) throw new Error("Bouty student identity is missing or ambiguous.");
     const queries = [...new Set([String(studentName || "").trim(), wanted].filter(Boolean))];
@@ -258,11 +282,7 @@ export function createBoutyResolver({ origin, page, csrf }) {
     return profile;
   }
   resolve.student = async (input) => withEnrollment(await student(input));
-  resolve.studentById = async (id, studentNumber) => {
-    const ctx = await load("/students", "students.index");
-    const number = tableRows(document(ctx.html)).get(id)?.[1] || studentNumber;
-    return withEnrollment(await editStudent(ctx, id, number));
-  };
+  resolve.studentById = async (id, studentNumber) => withEnrollment(await studentById(id, studentNumber));
   resolve.roster = roster;
   resolve.rosterProfiles = (pageNumber) => roster("", pageNumber, true);
   resolve.studentsFor = studentsFor;
