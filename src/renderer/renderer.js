@@ -53,6 +53,12 @@ const manualPick = document.querySelector("#manual-pick");
 const manualSearch = document.querySelector("#manual-search");
 const manualEmpty = document.querySelector("#manual-empty");
 const manualList = document.querySelector("#manual-list");
+const boutyRosterActions = document.querySelector("#bouty-roster-actions");
+const boutyRosterPrev = document.querySelector("#bouty-roster-prev");
+const boutyRosterNext = document.querySelector("#bouty-roster-next");
+const boutyRosterRefresh = document.querySelector("#bouty-roster-refresh");
+const confirmProfileChips = document.querySelector("#confirm-profile-chips");
+const confirmProfileFields = document.querySelector("#confirm-profile-fields");
 const confirmCancel = document.querySelector("#confirm-cancel");
 const confirmOk = document.querySelector("#confirm-ok");
 const syncStudents = document.querySelector("#sync-students");
@@ -73,6 +79,8 @@ let dashboardOpen = false;
 let printsSeen = false;
 let printsGen = 0;
 let manualGen = 0;
+let manualSearchTimer;
+let boutyRosterPage = 1;
 let deletingPrints = false;
 
 function renderUpdate(updateState) {
@@ -231,6 +239,9 @@ function paintPendingGallery(images, singleUrl, locked) {
 }
 
 function closeManualPick() {
+  clearTimeout(manualSearchTimer);
+  manualGen += 1;
+  boutyRosterPage = 1;
   manualPick.hidden = true;
   manualSearch.value = "";
   manualList.replaceChildren();
@@ -508,7 +519,10 @@ function paintConfirm() {
   confirmDetail.hidden = !confirmRequest.detail;
   confirmDetail.textContent = translate(confirmRequest.detail || "");
   confirmOk.textContent = translate(confirmRequest.confirmLabel);
+  confirmOk.hidden = confirmRequest.canConfirm === false;
+  confirmCancel.textContent = translate(confirmRequest.canConfirm === false ? "Close" : "Cancel");
   confirmOk.className = confirmRequest.tone === "primary" ? "primary" : "danger";
+  renderProfile(confirmRequest.fields, confirmProfileChips, confirmProfileFields);
 }
 
 function askConfirm(request) {
@@ -573,9 +587,9 @@ async function saveTodayTime(person, input) {
   }
 }
 
-function renderProfile(fields) {
-  lastChips.replaceChildren();
-  lastFields.replaceChildren();
+function renderProfile(fields, chips = lastChips, lines = lastFields) {
+  chips.replaceChildren();
+  lines.replaceChildren();
   for (const field of Array.isArray(fields) ? fields : []) {
     const value = translate(field.value);
     if (field.kind === "phone" || field.kind === "line") {
@@ -584,7 +598,7 @@ function renderProfile(fields) {
       const dd = document.createElement("dd");
       dd.dir = field.kind === "phone" ? "ltr" : "auto";
       dd.textContent = value;
-      lastFields.append(dt, dd);
+      lines.append(dt, dd);
       continue;
     }
     const chip = document.createElement("span");
@@ -597,10 +611,10 @@ function renderProfile(fields) {
       chip.append(label);
     }
     chip.append(document.createTextNode(value));
-    lastChips.append(chip);
+    chips.append(chip);
   }
-  lastChips.hidden = lastChips.childElementCount === 0;
-  lastFields.hidden = lastFields.childElementCount === 0;
+  chips.hidden = chips.childElementCount === 0;
+  lines.hidden = lines.childElementCount === 0;
 }
 
 function render(state) {
@@ -612,6 +626,13 @@ function render(state) {
   renderServiceAccount(state);
   document.querySelector("#bouty-status").textContent = translate(state.bouty?.message || (state.bouty?.enabled ? "Bouty account saved." : "Bouty is not configured."));
   const mode = screenForPhase(state.phase);
+  const website = state.config?.attendanceDestination === "bouty";
+  const manualLabel = website ? "Browse Bouty students" : "Mark without a finger";
+  const searchLabel = website ? "Type a name or student number" : "Type a name";
+  markManual.dataset.i18n = manualLabel;
+  markManual.textContent = translate(manualLabel);
+  manualSearch.dataset.i18nPlaceholder = searchLabel;
+  manualSearch.placeholder = translate(searchLabel);
   const enteredPicker = mode === "pending" && !picker;
   const enteredConfig = mode === "config" && !configOpen;
   picker = mode === "pending";
@@ -989,7 +1010,7 @@ function chooseLang(lang) {
   if (lastState) render(lastState);
 }
 
-function renderManualList(students) {
+function renderManualList(students, website) {
   manualList.replaceChildren();
   for (const student of students) {
     const item = document.createElement("li");
@@ -1001,31 +1022,63 @@ function renderManualList(students) {
     const sub = document.createElement("span");
     sub.className = "sub";
     sub.dir = "ltr";
-    sub.textContent = student.studentId && student.studentId !== student.studentName ? student.studentId : "";
+    const identifier = website ? student.studentNumber : student.studentId;
+    sub.textContent = identifier && identifier !== student.studentName ? identifier : "";
     button.append(name, sub);
-    button.addEventListener("click", () => confirmManual(student));
+    button.addEventListener("click", () => website ? openBoutyProfile(student) : confirmManual(student));
     item.append(button);
     manualList.append(item);
   }
 }
 
 async function refreshManual() {
+  clearTimeout(manualSearchTimer);
   const gen = ++manualGen;
-  const result = await window.attendance.filter(manualSearch.value);
+  const website = lastState?.config?.attendanceDestination === "bouty";
+  boutyRosterActions.hidden = !website;
+  if (website) {
+    manualList.replaceChildren();
+    manualEmpty.hidden = false;
+    manualEmpty.textContent = translate("Searching Bouty…");
+    boutyRosterPrev.disabled = true;
+    boutyRosterNext.disabled = true;
+    boutyRosterRefresh.disabled = true;
+  }
+  const result = website
+    ? await window.attendance.boutyRoster({ query: manualSearch.value, page: boutyRosterPage })
+    : await window.attendance.filter(manualSearch.value);
   if (gen !== manualGen || manualPick.hidden) return;
   const students = Array.isArray(result) ? result : result?.students || [];
   const problem = Array.isArray(result) ? "" : result?.error || "";
   manualEmpty.hidden = students.length !== 0 && !problem;
   manualEmpty.textContent = translate(problem || "No matching students");
-  renderManualList(problem ? [] : students);
+  renderManualList(problem ? [] : students, website);
+  boutyRosterPrev.disabled = boutyRosterPage <= 1;
+  boutyRosterNext.disabled = !result?.hasNext;
+  boutyRosterRefresh.disabled = false;
 }
 
-async function confirmManual(student) {
+async function openBoutyProfile(student) {
+  const gen = ++manualGen;
+  for (const button of manualList.querySelectorAll("button")) button.disabled = true;
+  manualEmpty.hidden = false;
+  manualEmpty.textContent = translate("Loading Bouty student information…");
+  const profile = await window.attendance.boutyStudent(student);
+  if (gen !== manualGen || manualPick.hidden) return;
+  for (const button of manualList.querySelectorAll("button")) button.disabled = false;
+  manualEmpty.hidden = !profile.error;
+  manualEmpty.textContent = translate(profile.error || "");
+  if (!profile.error) await confirmManual(profile, true);
+}
+
+async function confirmManual(student, website = false) {
   const accepted = await askConfirm({
-    title: "Mark without a finger?",
+    title: website ? "Student details" : "Mark without a finger?",
     name: student.studentName || "",
     id: student.studentId || "",
-    detail: "",
+    detail: website && !student.studentId ? "Bouty students need an unambiguous source ID." : "",
+    fields: student.fields,
+    canConfirm: !website || Boolean(student.studentId),
     confirmLabel: "Mark present",
     tone: "primary",
   });
@@ -1051,7 +1104,19 @@ markManual.addEventListener("click", () => {
   manualSearch.focus();
   refreshManual();
 });
-manualSearch.addEventListener("input", () => refreshManual());
+manualSearch.addEventListener("input", () => {
+  boutyRosterPage = 1;
+  if (lastState?.config?.attendanceDestination !== "bouty") return refreshManual();
+  manualGen += 1;
+  manualList.replaceChildren();
+  boutyRosterPrev.disabled = true;
+  boutyRosterNext.disabled = true;
+  clearTimeout(manualSearchTimer);
+  manualSearchTimer = setTimeout(refreshManual, 350);
+});
+boutyRosterPrev.addEventListener("click", () => { boutyRosterPage -= 1; void refreshManual(); });
+boutyRosterNext.addEventListener("click", () => { boutyRosterPage += 1; void refreshManual(); });
+boutyRosterRefresh.addEventListener("click", () => { boutyRosterPage = 1; void refreshManual(); });
 
 for (const button of document.querySelectorAll("[data-lang]")) {
   button.addEventListener("click", () => chooseLang(button.dataset.lang));

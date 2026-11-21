@@ -651,9 +651,24 @@ export function attachLogTimes(present, logRows, date) {
 
 /** In Bouty mode the Pages log, rather than the date grid, supplies today's list. */
 export function presentFromLog(students, logRows, date = new Date()) {
-  const people = (students || []).filter((student) => student.studentId && logHits(logRows, student.studentId, date).length)
-    .map((student) => ({ name: student.studentName || student.studentId, studentId: student.studentId, rowNumber: student.rowNumber }));
-  return attachLogTimes(people, logRows, date);
+  const layout = logLayout(logRows?.[0]);
+  const roster = new Map((students || []).map((student) => [canonicalStudentId(student.studentId), student]));
+  const people = new Map();
+  for (const [index, row] of (logRows || []).entries()) {
+    if (index === 0) continue;
+    const studentId = canonicalStudentId(row?.[layout.identity]);
+    const stamp = String(row?.[layout.time] ?? "").trim();
+    if (!studentId || people.has(studentId) || !isStampOnDay(stamp, date)) continue;
+    const student = roster.get(studentId);
+    people.set(studentId, {
+      name: student?.studentName || String(row[layout.name] ?? "").trim() || studentId,
+      studentId,
+      rowNumber: student?.rowNumber || 0,
+      time: clockFromStamp(stamp),
+      logRow: index + 1,
+    });
+  }
+  return [...people.values()];
 }
 
 /** Keep today's Damascus date and replace the clock. */

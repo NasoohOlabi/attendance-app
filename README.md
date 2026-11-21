@@ -38,6 +38,8 @@ In Settings → General, choose either the daily attendance sheet or the Bouty w
 
 In Settings → Bouty, enter the Bouty username and password and save. They are encrypted for the current Windows account. The app looks up the student by a name hint and the source ID in their Bouty notes, treating the roster's zero-padded ID as the corresponding numeric source ID. It then finds their active enrolment in the default course and checks that the enrolment is in that day's group. If a student, enrolment or day is missing or ambiguous, the scan stays queued. The roster and the Bouty student notes must contain the same source ID, and an attendance day with group sessions must already exist on the site. For new fingerprints, search the site's students by name; entries without a unique source ID are not offered for assignment.
 
+On the Attendance screen, **Browse Bouty students** opens the website roster. Search by name or student number, page through the results, or select **Refresh** to fetch the first page again. Select a student to view their profile and choose **Mark present** when their source ID is available.
+
 The advanced settings allow explicit IDs when automatic lookup is unavailable:
 
 ```json

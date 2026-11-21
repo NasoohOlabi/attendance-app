@@ -66,8 +66,13 @@
             <span data-i18n="Search students">Search students</span>
             <input id="manual-search" type="search" data-i18n-placeholder="Type a name" placeholder="Type a name" autocomplete="off" />
           </label>
-          <p id="manual-empty" class="detail" hidden></p>
+          <p id="manual-empty" class="detail" aria-live="polite" hidden></p>
           <ul id="manual-list"></ul>
+          <div id="bouty-roster-actions" class="actions" hidden>
+            <button id="bouty-roster-prev" class="secondary" type="button" data-i18n="Previous">Previous</button>
+            <button id="bouty-roster-next" class="secondary" type="button" data-i18n="Next">Next</button>
+            <button id="bouty-roster-refresh" class="secondary" type="button" data-i18n="Refresh">Refresh</button>
+          </div>
         </div>
         <img id="finger-ready" class="finger" data-i18n-alt="Scanned finger" alt="Scanned finger" hidden />
         <div id="prints-ready" class="prints" hidden></div>
@@ -256,6 +261,8 @@
         <p id="confirm-who"><span id="confirm-name" dir="auto"></span></p>
         <p id="confirm-id" dir="ltr" hidden></p>
         <p id="confirm-detail" class="detail"></p>
+        <div id="confirm-profile-chips" class="profile-chips" hidden></div>
+        <dl id="confirm-profile-fields" class="profile-fields" hidden></dl>
         <div class="actions">
           <button id="confirm-cancel" class="secondary" type="button" data-i18n="Cancel">Cancel</button>
           <button id="confirm-ok" class="danger" type="button"></button>

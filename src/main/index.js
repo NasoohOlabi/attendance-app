@@ -734,7 +734,7 @@ function waitingNote() {
 function shownPresent() {
   const people = overlayPresent(sheetPeople, outbox, todayDay());
   if (currentConfig?.attendanceDestination !== "bouty") return people;
-  return people.map((person) => ({ ...person, name: boutyNames.get(canonicalStudentId(person.studentId)) || person.studentId }));
+  return people.map((person) => ({ ...person, name: boutyNames.get(canonicalStudentId(person.studentId)) || person.name || person.studentId }));
 }
 
 function rosterStudent(student) {
@@ -771,6 +771,9 @@ async function acceptPresent(student) {
   const person = queuedFrom(student);
   person.destination = currentConfig?.attendanceDestination || "sheet";
   if (!person.studentId) return { op: "missing-id" };
+  if (person.destination === "bouty") {
+    person.studentName = boutyNames.get(person.studentId) || person.studentName;
+  }
   const next = queueManualPresent(outbox, sheetPeople, person, activeWrite);
   if (next === outbox) {
     publishShown({ detail: "Already here today." });
@@ -778,7 +781,7 @@ async function acceptPresent(student) {
   }
   if (person.destination === "bouty" && boutySync) {
     try { await boutySync.enqueue(person.studentId, "present", person.at, person.studentName); void boutySync.sync(); }
-    catch { publishBouty("Bouty: attendance could not be queued."); }
+    catch { throw new Error("Bouty: attendance could not be queued."); }
   }
   outbox = next;
   if (person.rowNumber) rememberScan(person.rowNumber, new Date());
@@ -798,7 +801,7 @@ async function acceptAbsent(input) {
   const logRow = Number(input?.logRow) || 0;
   const destination = currentConfig?.attendanceDestination || "sheet";
   if (destination === "bouty" && boutySync) {
-    try { await boutySync.enqueue(person.studentId, "absent", new Date().toISOString(), rosterStudent(person).studentName); void boutySync.sync(); }
+    try { await boutySync.enqueue(person.studentId, "absent", new Date().toISOString(), person.name); void boutySync.sync(); }
     catch { return { ok: false, error: "Bouty: attendance could not be queued." }; }
   }
   outbox = queueAbsent(outbox, { ...person, destination, at: new Date().toISOString(), logRow }, activeWrite);
@@ -2017,6 +2020,27 @@ function registerIpc() {
   });
   ipcMain.handle("getState", () => state);
   ipcMain.handle("updateAction", () => updateAction());
+  ipcMain.handle("boutyRoster", async (_event, { query, page } = {}) => {
+    if (currentConfig?.attendanceDestination !== "bouty") return { error: "Select Bouty as the attendance destination." };
+    try {
+      return await withBoutyLookup((api) => api.roster(String(query || "").trim().slice(0, 120), page));
+    } catch (error) {
+      return { error: error?.message?.startsWith("Bouty") ? error.message : "Bouty student information is unavailable." };
+    }
+  });
+  ipcMain.handle("boutyStudent", async (_event, { id, studentNumber } = {}) => {
+    const config = currentConfig;
+    if (config?.attendanceDestination !== "bouty") return { error: "Select Bouty as the attendance destination." };
+    try {
+      const profile = await withBoutyLookup((api) => api.studentById(id, String(studentNumber || "").slice(0, 32)));
+      const index = await loadIndex(config.fingerprintDir);
+      const [choice] = boutyStudentChoices([profile], index.students);
+      if (choice) boutyNames.set(choice.studentId, profile.studentName);
+      return { studentName: profile.studentName, studentId: choice?.studentId || "", fields: profile.fields };
+    } catch (error) {
+      return { error: error?.message?.startsWith("Bouty") ? error.message : "Bouty student information is unavailable." };
+    }
+  });
   ipcMain.handle("filter", async (_event, query) => {
     if (currentConfig?.attendanceDestination === "bouty") {
       const text = String(query || "").trim().slice(0, 120);
@@ -2277,6 +2301,7 @@ function registerIpc() {
       return { ok: true };
     } catch (err) {
       const message = err?.message || "The sheet could not be updated.";
+      if (message.startsWith("Bouty:")) return { ok: false, error: message };
       console.error(message);
       const shown = sheetWindow(describeApiFailure(message));
       publish(shown);
