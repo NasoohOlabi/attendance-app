@@ -7,6 +7,38 @@ async function openSettings(page) {
   await expect(page.locator("#config")).toBeVisible();
 }
 
+test("manual Bouty overrides use labelled fields and reject duplicate dates", async ({ app }) => {
+  await openSettings(app.page);
+  await app.electron.evaluate(({ ipcMain }) => {
+    ipcMain.removeHandler("saveBouty");
+    ipcMain.handle("saveBouty", (_event, input) => {
+      globalThis.savedBoutyOverrides = JSON.parse(input.settings);
+      return { ok: true };
+    });
+  });
+  await app.page.locator("#bouty-advanced").evaluate((element) => { element.hidden = false; element.open = true; });
+  await app.page.locator("#add-bouty-day").click();
+  const date = app.page.locator("#bouty-days .override-row").first();
+  await date.getByLabel("Date in Damascus").fill("2026-11-21");
+  await date.getByLabel("Attendance day ID").fill("42");
+  await app.page.locator("#add-bouty-link").click();
+  await app.page.getByLabel("Student ID", { exact: true }).fill("123");
+  await app.page.getByLabel("Enrolment ID", { exact: true }).fill("456");
+  await app.page.locator("#save-bouty-advanced").click();
+  expect(await app.electron.evaluate(() => globalThis.savedBoutyOverrides)).toEqual({
+    mapping: [{ studentId: "123", enrollmentId: 456 }], days: { "2026-11-21": 42 }, presentStatusId: 1, absentStatusId: 2,
+  });
+  await app.page.locator("#add-bouty-day").click();
+  const duplicate = app.page.locator("#bouty-days .override-row").last();
+  await duplicate.getByLabel("Date in Damascus").fill("2026-11-21");
+  await duplicate.getByLabel("Attendance day ID").fill("99");
+  await app.page.locator("#save-bouty-advanced").click();
+  await expect(app.page.getByText("Each attendance date can only be listed once.")).toBeVisible();
+  expect((await app.electron.evaluate(() => globalThis.savedBoutyOverrides)).days).toEqual({ "2026-11-21": 42 });
+  await duplicate.getByRole("button", { name: "Remove", exact: true }).click();
+  await expect(app.page.locator("#bouty-days .override-row")).toHaveCount(1);
+});
+
 test("settings cancel discards edits", async ({ app }) => {
   const before = await readFile(app.configPath, "utf8");
   await openSettings(app.page);

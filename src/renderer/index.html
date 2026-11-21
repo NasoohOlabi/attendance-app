@@ -162,10 +162,30 @@
             <button id="save-bouty" class="primary" type="button" data-i18n="Sign in to Bouty">Sign in to Bouty</button>
             <button id="sign-out-bouty" class="secondary" type="button" data-i18n="Sign out" hidden>Sign out</button>
           </div>
-          <details id="bouty-advanced" hidden><summary data-i18n="Advanced Bouty settings">Advanced Bouty settings</summary>
-            <label class="field"><span data-i18n="Bouty attendance settings">Bouty attendance settings</span><textarea id="bouty-settings" rows="10" dir="ltr" spellcheck="false"></textarea></label>
-            <p class="detail" data-i18n="Set each date to its existing attendance day ID and map each roster ID to its enrolment ID. Keep earlier dates until their queued scans are sent.">Set each date to its existing attendance day ID and map each roster ID to its enrolment ID. Keep earlier dates until their queued scans are sent.</p>
-            <button id="save-bouty-advanced" class="secondary" type="button" data-i18n="Save Bouty settings">Save Bouty settings</button>
+          <p class="detail" data-i18n="Bouty finds attendance days and student enrolments automatically.">Bouty finds attendance days and student enrolments automatically.</p>
+          <details id="bouty-advanced" hidden><summary data-i18n="Manual attendance overrides">Manual attendance overrides</summary>
+            <p class="detail" data-i18n="Usually leave these empty. A manual override is used only when both a student link and a date are listed here. Otherwise Bouty finds the attendance details automatically.">Usually leave these empty. A manual override is used only when both a student link and a date are listed here. Otherwise Bouty finds the attendance details automatically.</p>
+            <section class="bouty-setting-group" aria-labelledby="bouty-days-title">
+              <h2 id="bouty-days-title" data-i18n="Attendance dates">Attendance dates</h2>
+              <p class="detail" data-i18n="Link a Damascus date to an existing Bouty attendance day ID. This does not create a day. Keep dates while their attendance is waiting to sync.">Link a Damascus date to an existing Bouty attendance day ID. This does not create a day. Keep dates while their attendance is waiting to sync.</p>
+              <div id="bouty-days" class="override-list"></div>
+              <button id="add-bouty-day" class="secondary" type="button" data-i18n="Add date">Add date</button>
+            </section>
+            <section class="bouty-setting-group" aria-labelledby="bouty-links-title">
+              <h2 id="bouty-links-title" data-i18n="Student links">Student links</h2>
+              <p class="detail" data-i18n="Link a student ID to their active Bouty enrolment ID. The enrolment ID identifies their registration, not the student.">Link a student ID to their active Bouty enrolment ID. The enrolment ID identifies their registration, not the student.</p>
+              <div id="bouty-mapping" class="override-list"></div>
+              <button id="add-bouty-link" class="secondary" type="button" data-i18n="Add student link">Add student link</button>
+            </section>
+            <section class="bouty-setting-group" aria-labelledby="bouty-status-title">
+              <h2 id="bouty-status-title" data-i18n="Attendance status codes">Attendance status codes</h2>
+              <p class="detail" data-i18n="Used with manual overrides. Keep the defaults unless your Bouty administrator gives you different codes.">Used with manual overrides. Keep the defaults unless your Bouty administrator gives you different codes.</p>
+              <div class="override-codes">
+                <label class="field"><span data-i18n="Present code">Present code</span><input id="bouty-present" type="number" min="1" step="1" required dir="ltr" /></label>
+                <label class="field"><span data-i18n="Absent code">Absent code</span><input id="bouty-absent" type="number" min="1" step="1" required dir="ltr" /></label>
+              </div>
+            </section>
+            <button id="save-bouty-advanced" class="primary" type="button" data-i18n="Save overrides">Save overrides</button>
           </details>
         </div>
         <div class="field field-wide">
