@@ -16,16 +16,29 @@ export function createBoutyClient(fetch) {
   let userId = "";
 
   async function page(path, options = {}) {
-    // Electron's session.fetch can return an empty response.url. Reject redirects
-    // before the request is sent so the fixed origin remains the trust boundary.
-    const response = await fetch(`${ORIGIN}${path}`, { ...options, credentials: "include", redirect: "error", signal: AbortSignal.timeout(30000) })
-      .catch(() => { throw new Error("Bouty connection failed."); });
+    const expired = () => Object.assign(new Error("Bouty session expired."), { code: "BOUTY_SESSION_EXPIRED" });
+    // Electron can cancel a manual redirect after receiving headers.
+    const response = await fetch(`${ORIGIN}${path}`, { ...options, credentials: "include", redirect: "manual", signal: AbortSignal.timeout(30000) })
+      .catch((error) => { throw error?.message === "Redirect was cancelled" ? expired() : new Error("Bouty connection failed."); });
+    if ([301, 302, 303, 307, 308, 401, 419].includes(response.status) || response.type === "opaqueredirect") throw expired();
     if (!response.ok || (response.url && new URL(response.url).origin !== ORIGIN)) throw new Error("Bouty connection failed.");
     return response;
   }
 
   const resolve = createBoutyResolver({ origin: ORIGIN, page, csrf: () => csrf });
   return {
+    async logout() {
+      const token = csrf;
+      csrf = "";
+      userId = "";
+      if (!token) return;
+      await fetch(`${ORIGIN}/logout`, {
+        method: "POST", credentials: "include", redirect: "manual",
+        signal: AbortSignal.timeout(5000),
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ _token: token }).toString(),
+      });
+    },
     async login(username, password) {
       csrf = "";
       userId = "";

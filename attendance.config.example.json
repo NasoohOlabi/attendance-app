@@ -1,13 +1,7 @@
 {
-  "_note": "Copy to attendance.config.json. Import a key in Settings > Service account to store it encrypted beside fingerprints. serviceAccountJson is only for a legacy external key-file path, never the key itself. Leave a field empty when you do not have a value yet.",
-  "serviceAccountJson": "",
-  "attendanceDestination": "sheet",
-  "spreadsheetId": "",
-  "sheetGid": null,
-  "logSpreadsheetId": "",
-  "logSheetGid": null,
-  "fingerprintSheetGid": null,
+  "_note": "Optional scanner and update settings. Sign in to Bouty inside the app.",
   "zk4500Cli": "",
   "scanTimeoutSeconds": 20,
-  "syncIntervalSeconds": 60
+  "syncIntervalSeconds": 60,
+  "updateChannel": "stable"
 }

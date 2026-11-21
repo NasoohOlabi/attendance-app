@@ -131,6 +131,14 @@ export const test = base.extend({
       page = await electron.firstWindow();
       page.on("pageerror", (error) => runtimeErrors.push(error.message));
       await expect(page.locator("#settings")).toBeVisible();
+      if (fixtureOptions.signedIn !== false && !(await page.evaluate(() => window.attendance.getState())).bouty?.enabled) {
+        const result = await page.evaluate(() => window.attendance.saveBouty({
+          username: "synthetic-user",
+          password: "synthetic-password",
+          settings: JSON.stringify({ mapping: [], days: {}, presentStatusId: 1, absentStatusId: 2 }),
+        }));
+        expect(result).toEqual({ ok: true });
+      }
     };
     const stop = async () => {
       stopping = true;
@@ -173,16 +181,18 @@ export const test = base.extend({
         try { return JSON.parse(await readFile(path.join(home, "Masjid/attendance-outbox.json"), "utf8")); }
         catch (error) { if (error.code === "ENOENT") return { items: [] }; throw error; }
       },
-      async index() { return JSON.parse(await readFile(path.join(prints, "index.json"), "utf8")); },
+      async index() {
+        try { return JSON.parse(await readFile(path.join(prints, "index.json"), "utf8")); }
+        catch (error) { if (error.code === "ENOENT") return { students: {}, pending: null }; throw error; }
+      },
       async files() { return readdir(path.join(prints, "templates")); },
       async ready() {
         await expect(page.locator("#today-count")).toHaveText("0");
-        await expect.poll(async () => (await driver.state()).syncNote).toMatch(/^Synced /);
       },
-      async mark(id = "00 00 000 001") {
+      async mark(id = "00 00 000 005") {
         driver.enqueue({ matchSid: `s-${id.replaceAll(" ", "-")}` });
       },
-      async seedPrint(id = "00 00 000 001", name = "أحمد طالب") {
+      async seedPrint(id = "00 00 000 005", name = "Website Student") {
         const file = `s-${id.replaceAll(" ", "-")}.txt`;
         const index = await driver.index();
         index.students[id] = { studentId: id, studentName: name, templateFile: file, capturedAt: env.ATTENDANCE_E2E_CLOCK };

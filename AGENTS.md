@@ -1,6 +1,6 @@
 # Masjid attendance
 
-Local Windows app for the mosque sheet. A finger on the ZK4500 marks the student حاضر. Read this before changing the scanner, the sheet, or the window. Spreadsheet ids and gids live in gitignored `attendance.config.json`, not in source. Settings → Service account imports a Google JSON key into `~/Masjid/v1/config/service-account.enc`, beside the fingerprint folder. `src/credentials.mjs` uses Electron's asynchronous safeStorage API and Windows DPAPI; no separate plaintext encryption key or temporary plaintext account copy is stored. Only account status/email/location reach the renderer. Legacy service-account file paths still work until an account is imported; then the encrypted account takes precedence.
+Local Windows app for the Bouty mosque roster. A finger on the ZK4500 queues attendance for the student's Marif ID. The settings file is optional and local. Bouty credentials are encrypted for the Windows user and remain in the Electron main process.
 
 Scanner source lives in `scanner/`. `node scripts/scanner-release.mjs` publishes the self-contained exe into `staging/scanner/`, and dev launches the path in `zk4500Cli`. `scanner/AGENTS.md` is the capture and match contract. This file is the host app and the bugs that showed up while wiring the two together. The installer copies that staged folder to `resources/scanner/`. The packaged app runs that copy.
 
@@ -26,8 +26,8 @@ Node ESM, Bun, electron-vite (Vite 6), Electron 44, vanilla renderer (no React).
 - Preload: `src/preload/`
 - Renderer: `src/renderer/index.html`, `style.css`, `renderer.js`, `view.js`
 - Scan loop and zk4500 stdout: `src/scan.mjs`
-- Sheet planning: `src/store.mjs`
-- Google writes: `src/google.mjs`
+- Bouty login, roster, and writes: `src/bouty.mjs` and `src/bouty-resolve.mjs`
+- Persistent attendance queue and credentials: `src/bouty-sync.mjs` and `src/bouty-storage.mjs`
 - Paths and ids: `src/config.mjs` and gitignored `attendance.config.json`
 
 One attendance process at a time. One `zk4500.exe` at a time. Do not kill every `electron.exe` on the machine. Cursor is Electron too. Kill only the `electron-vite` node for this app, and only when `zk4500.exe` is not running (see the scanner bug below).
@@ -44,28 +44,15 @@ The place cue is an inline SVG of a finger and the sensor (`#place`):
 
 `fingerCue` in `src/renderer/view.js` decides that. Tones `again`, `listen`, `trouble`, and `idle` clear “ready”. `prefers-reduced-motion` parks `now` on the pressed pose with no loop.
 
-## Sheet
+## Bouty attendance
 
-Mosque grid: the `spreadsheetId` / `sheetGid` in `attendance.config.json`, tab title `Info`.
+Roster identity is the Marif ID in the student's Bouty source notes. Require an exact source ID and a unique active enrolment. Resolve the Damascus date to an existing attendance day and group session on Bouty before writing. The app sends individual present or absent operations with stable retry IDs. Never create days or group sessions from a scan.
 
-- Column A header `إسم كامل` is the student name. Column B header `معرف` is the Marif id (`00 00 000 001`). Link the roster, the time log, and fingerprints by that id. The same name may appear twice when the ids differ. Two rows with the same id are a duplicate: `planAttendance` returns `duplicate` and writes nothing. A row with no id is not written.
-- Row 1 is headers. Row 2 is counts (`COUNTA`). Students start at row 3.
-- A present cell is the date checkbox, and that checkbox’s checked value is the Arabic word `حاضر`. An absent cell is empty, which leaves the box unchecked. `attendanceValue` returns that. `COUNTA` counts every non-empty cell, so `TRUE` / `FALSE` is the wrong value.
-- Write the one date cell for that id. Do not restyle the sheet, do not write a whole row, and do not add a row for an unknown name.
-- Date columns are not in strict calendar order. Today’s column is whichever header matches today’s day and month (`findDateColumn`). Inserting `معرف` moved the first date from M to N.
-- The new-fingerprint search only filters the cached roster. Reload the roster at startup, when opening the new-fingerprint picker, and after queued attendance changes are written. Idle sync ticks must not read the sheet; they only retry pending outbox writes. Sheet titles and ids are cached per Google client, including concurrent metadata requests.
+Reuse one isolated Bouty session across roster lookups and attendance sync. Save verified credentials with Windows safeStorage in `~/Masjid/v1/config/bouty-account.enc`. Sign-out clears the file and session. Keep pending marks tied to the original account. The Today list and dashboard summarize local Bouty operations, including those awaiting sync.
 
-Time log: `logSpreadsheetId` / `logSheetGid` in `attendance.config.json`, tab `AttendanceLog` in the file titled Pages. Headers are `الطالب`, `إسم`, and `حضور`. New rows store the Marif id in `الطالب`, the roster name in `إسم`, and the Damascus stamp in `حضور`. The app does not add that name column; when it is missing, the row is still just the id and the stamp. Existing rows are left as they are. The window still shows the Arabic name by looking the id up on the roster. The timestamp is Asia/Damascus, day/month, no leading zeros, 24-hour clock, for example `3/10/2026 16:55:03` (`attendanceStamp` / `attendanceLogRow`). The log does not store the word حاضر.
+Fingerprint templates and enrollment links are local. Match `s-{id}.txt` plus numbered copies like `s-{id}--2.txt`. Keep the primary link in the index and preserve older copies on enrollment. Deleting prints removes local copies and links. Google Sheets credentials, IDs, and pending writes have no role in the running app.
 
-The log append runs after the cell write. If the append throws, the حاضر cell stays and the detail line is “Marked present. The time log was not written.” The mark stays in the local queue until the log succeeds, including API and permission failures. A retry skips a cell already written. Today's list keeps the mark when the queue drains, even if the following roster reload fails.
-
-Today’s list updates before Google answers. A mark, an undo, and a clock change land in `~/Masjid/attendance-outbox.json` and on the window immediately. The scan loop does not wait for the sheet. When the network is back, the queue writes the checkbox cell and the time-log row, then reloads. Undo of a mark that has not been written yet drops that queued mark. Undo after the write clears the date cell and leaves the checkbox, then deletes the matching time-log row for today, matched by id. Writing `""` through the values API leaves the checkbox and `COUNTA` still counts it, so the clear goes through `writeAttendanceCell`. Changing the clock keeps the Damascus date and rewrites that log row (`stampFromClock`). When the log has no time, the clock shows when the finger was scanned.
-
-Diagnostic lines for this app go to `~/Masjid/logs/attendance-YYYY-MM-DD.log`. That file gets scanner lines, sheet failures, renderer errors, and uncaught exceptions. Look there first when something breaks after the terminal is gone. The roster file `log.json` inside the fingerprints folder is the enrolled-student list, not this bug log.
-
-Fingerprints tab: same Pages file, `fingerprintSheetGid` in `attendance.config.json`, tab `FingerPrints`. Headers are `student_id`, `fingerprint`, and `created_at`. A saved print appends one row: the Marif id, the template text, and the scan time in the same Damascus stamp as the time log. Several rows can share an id. The scanner still matches local files: `s-{id}.txt`, with spaces in the id turned into hyphens (`s-00-00-000-001.txt`), extras `s-{id}--2.txt`. `zk4500 identify` only loads `*.txt` whose stem starts with `s-` or `t-`. Saving a print writes the next free local file and appends one sheet row. The first print is `s-{id}.txt`; later prints are `s-{id}--2.txt`, `--3`, and so on. Assigning a scan does not delete or overwrite older prints, and the index keeps pointing at the primary file. If that append throws, the local file stays and the detail line says the fingerprint sheet was not written. Startup copies sheet templates that are missing on disk and does not delete local files the sheet lacks.
-
-Prints stay on this computer: `~/Masjid/v1/fingerprints/templates/`. Settings → Delete all fingerprints removes those local files, the pending scan, the roster, and every data row on the fingerprints tab. The header row stays. The attendance sheet is left as it is. The sheet is cleared before the local files, so a failed sheet write does not wipe the copies that startup would restore. Fingerprints in the sidebar deletes one student's prints: matching FingerPrints rows first, then that student's local `s-{id}.txt` and `s-{id}--N.txt` files (or the name-based file when the student has no id) and the index entry. A failed sheet delete leaves the local files. Attendance cells and the time log stay. Startup still copies sheet templates that are missing on disk and does not delete local files the sheet lacks. Google Drive is not used.
+Diagnostic lines go to `~/Masjid/logs/attendance-YYYY-MM-DD.log`. Look there first for scanner errors, Bouty failures, and renderer errors.
 
 ## Common bugs
 
@@ -96,22 +83,6 @@ Cause: the USB device is locked. `sensor_count=1` means the SDK can see it and c
 Fix: do not force-kill a process that owns the scanner. Let the capture exit. `OpenEngine` retries `InitEngine` once (`EndEngine`, 500ms, `SensorIndex=0`). If it is still not 0, the CLI prints `error=scanner_not_ready` and exits 1 without `BeginCapture`. To unlock the device, unplug and replug it, or run `pnputil /restart-device` as admin on `USB\VID_1B55&PID_0840\…`. `Disable-PnpDevice` has failed here with `0x80041001`. From Git Bash, `&` in that instance id is eaten unless the id is single-quoted inside PowerShell.
 
 The host kill timer is `2 * timeout + grace` (45s when timeout is 20 and grace is 5), not `timeout + 5`. The first finger-down extends the CLI deadline once by another full timeout. `SCAN_RETRY_PAUSE_MS` is 2000. The running exe is `staging/scanner/zk4500.exe`, produced by `node scripts/scanner-release.mjs`.
-
-### The checkbox disappears, or the count jumps
-
-Symptom: today’s cell shows the word `حاضر` and the checkbox is gone, or the cell is a boolean and the row-2 count is higher than the number of students who were here.
-
-Cause: the date checkbox is a `BOOLEAN` rule whose checked value is `حاضر`. `spreadsheets.values.update` stores that word and deletes the rule. Boolean `FALSE` is non-empty, so `COUNTA` counts it as present.
-
-Fix: `writeAttendanceCell` sets `حاضر` or clears the value and writes the same checkbox rule, with `showCustomUi`, in that `updateCells` call. `values.clear` deletes the rule, so undo must not use it. Do not write `TRUE` or `FALSE`. Do not write extra test cells.
-
-### The time log never grows
-
-Symptom: the student is حاضر, and the UI says the time log was not written. The API returns `403 PERMISSION_DENIED` for the Pages spreadsheet.
-
-Cause: the Pages spreadsheet is not shared with the service account. The fingerprints tab on that same file is refused too.
-
-Fix: share that spreadsheet as Editor with the service-account email from the key file. The key file is gitignored. Attendance stays queued locally and retries on sync ticks, so sharing takes effect without restarting. Do not undo the حاضر cell when the append fails. A failed fingerprint append leaves the local `s-{id}.txt` in place.
 
 ### The place cue says to put a finger down before the sensor is open
 

@@ -10,56 +10,23 @@ async function openSettings(page) {
 test("settings cancel discards edits", async ({ app }) => {
   const before = await readFile(app.configPath, "utf8");
   await openSettings(app.page);
-  await app.page.locator("#cfg-sheet").fill("unsaved-sheet");
+  await app.page.locator("#cfg-exe").fill("unsaved-scanner");
   await app.page.locator("#cancel").click();
   await expect(app.page.locator("#ready")).toBeVisible();
   expect(await readFile(app.configPath, "utf8")).toBe(before);
 });
 
-test("settings save persists editable values without dropping Pages configuration", async ({ app }) => {
-  const alternate = structuredClone(app.sheets.grid("Info"));
-  alternate.sheetId = 8;
-  alternate.title = "Alternate";
-  app.sheets.grids.push(alternate);
+test("settings save persists the update track without requiring Sheets", async ({ app }) => {
   await openSettings(app.page);
-  await app.page.locator("#cfg-gid").fill("8");
+  await app.page.locator("#track-nightly").click();
   app.enqueue({ exitCode: 2, error: "timeout", events: [] });
   await app.page.locator("#save").click();
   await expect(app.page.locator("#ready")).toBeVisible();
-
-  const saved = JSON.parse(await readFile(app.configPath, "utf8"));
-  expect(saved).toMatchObject({
-    serviceAccountJson: path.join(app.root, "synthetic-key.json"),
-    spreadsheetId: "attendance-test",
-    sheetGid: 8,
-    logSpreadsheetId: "pages-test",
-    logSheetGid: 2,
-    fingerprintSheetGid: 3,
-  });
+  expect(JSON.parse(await readFile(app.configPath, "utf8")).updateChannel).toBe("nightly");
   await app.restart();
   await openSettings(app.page);
-  await expect(app.page.locator("#cfg-sheet")).toHaveValue("attendance-test");
-  await expect(app.page.locator("#cfg-gid")).toHaveValue("8");
-});
-
-test("invalid gid is rejected without saving", async ({ app }) => {
-  const before = await readFile(app.configPath, "utf8");
-  await openSettings(app.page);
-  await app.page.locator("#cfg-gid").fill("-1");
-  await app.page.locator("#save").click();
-  await expect(app.page.locator("#error")).toContainText("Sheet gid must be a number.");
-  await expect(app.page.locator("#config")).toBeVisible();
-  expect(await readFile(app.configPath, "utf8")).toBe(before);
-});
-
-test("account settings offer file import without a raw key text field", async ({ app }) => {
-  const before = await readFile(app.configPath, "utf8");
-  await openSettings(app.page);
-  await app.page.locator("#settings-account-tab").click();
-  await expect(app.page.locator("#import-account")).toBeVisible();
-  await expect(app.page.locator("#cfg-key")).toHaveCount(0);
-  await expect(app.page.locator("#account-status")).toContainText("external key");
-  expect(await readFile(app.configPath, "utf8")).toBe(before);
+  await expect(app.page.locator("#track-nightly")).toHaveAttribute("aria-pressed", "true");
+  await expect(app.page.locator("#cfg-sheet")).toHaveCount(0);
 });
 
 test("Browse places the chosen executable path in the scanner field", async ({ app }) => {
@@ -101,9 +68,10 @@ test("each Arabic font is selectable and the latest choice survives restart", as
   await expect(app.page.locator('button[data-font="naskh"]')).toHaveAttribute("aria-pressed", "true");
 });
 
-test("fingerprint deletion confirmation can be canceled three ways without a sheet write", async ({ app }) => {
+test("fingerprint deletion confirmation can be canceled three ways", async ({ app }) => {
   await openSettings(app.page);
-  const before = app.sheets.requests.length;
+  await app.seedPrint();
+  const before = await app.files();
   const confirm = app.page.locator("#confirm");
 
   await app.page.locator("#clear-prints").click();
@@ -120,8 +88,7 @@ test("fingerprint deletion confirmation can be canceled three ways without a she
   await expect(confirm).toBeVisible();
   await app.page.locator("#confirm-cancel").click();
   await expect(confirm).toBeHidden();
-  expect(app.sheets.requests.slice(before).filter((request) => request.method === "POST" || request.method === "PUT")).toEqual([]);
-  expect(app.sheets.grid("FingerPrints").rows).toHaveLength(1);
+  expect(await app.files()).toEqual(before);
 });
 
 test("ready window keeps its default size and honors its minimum size", async ({ app }) => {

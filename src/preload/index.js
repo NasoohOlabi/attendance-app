@@ -14,8 +14,8 @@ contextBridge.exposeInMainWorld("attendance", {
   discardScans: () => ipcRenderer.invoke("discardScans"),
   finishEnroll: () => ipcRenderer.invoke("finishEnroll"),
   saveConfig: (config) => ipcRenderer.invoke("saveConfig", config),
+  signOutBouty: () => ipcRenderer.invoke("signOutBouty"),
   saveBouty: (config) => ipcRenderer.invoke("saveBouty", config),
-  importServiceAccount: () => ipcRenderer.invoke("importServiceAccount"),
   pickFile: (kind) => ipcRenderer.invoke("pickFile", kind),
   openSettings: () => ipcRenderer.invoke("openSettings"),
   openPrints: () => ipcRenderer.invoke("openPrints"),
@@ -25,8 +25,6 @@ contextBridge.exposeInMainWorld("attendance", {
   clearFingerprints: () => ipcRenderer.invoke("clearFingerprints"),
   markPresent: (student) => ipcRenderer.invoke("markPresent", student),
   undoAttendance: (input) => ipcRenderer.invoke("undoAttendance", input),
-  setAttendanceTime: (input) => ipcRenderer.invoke("setAttendanceTime", input),
   closeSettings: () => ipcRenderer.invoke("closeSettings"),
-  syncStudents: () => ipcRenderer.invoke("syncStudents"),
   updateAction: () => ipcRenderer.invoke("updateAction"),
 });

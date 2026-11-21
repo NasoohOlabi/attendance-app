@@ -2,70 +2,85 @@ import { test, expect } from "./fixtures/app.mjs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-test.use({ fixtureOptions: { config: { attendanceDestination: "bouty", zk4500Cli: "Z:/missing-test-scanner.exe" } } });
+test.use({ fixtureOptions: { signedIn: false, config: { attendanceDestination: "sheet", zk4500Cli: "Z:/missing-test-scanner.exe" } } });
 
-async function mockBouty(electron) {
-  await electron.evaluate(({ session }) => {
-    const origin = "https://albouty.saas.alkheir-platform.com";
-    const escaped = (s) => s.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
-    const snapshot = (name, data) => JSON.stringify({ memo: { name }, data });
-    const html = (name, data, inner = "") => `<script data-update-uri="/livewire-test/update"></script><div wire:snapshot="${escaped(snapshot(name, data))}">${inner}</div>`;
-    const roster = (page = 1, search = "") => {
-      const rows = page === 2 ? '<tr><td>Another Student</td><td>91</td><td><button wire:click="edit(10)"></button></td></tr>'
-        : `<tr><td>${globalThis.boutyTestName}</td><td>90</td><td><button wire:click="edit(9)"></button></td></tr>`;
-      const next = !search && page === 1 ? '<button wire:click="nextPage(\'page\')"></button>' : "";
-      return html("students.index", {}, `<table>${rows}</table>${next}`);
-    };
-    const enrollments = html("enrollments.index", { courseFilter: "1" },
-      '<table><tr><td>1</td><td>Website Student</td><td>Website Group</td><td>Winter</td><td><button wire:click="edit(31)"></button></td></tr></table>');
-    const attendanceDay = html("attendance.index", { course_id: "1" },
-      '<select id="attendance-day-course"><option value="1">Winter</option></select><table><tr><td>12-10-2026</td><td>Winter</td><td><a href="/attendance/days/students/22">open</a></td></tr></table>');
-    globalThis.boutyTestName = "Website Student";
-    globalThis.boutyTestAttendance = [];
-    for (const name of ["bouty-login-check", "bouty-students", "bouty-attendance"]) {
-      session.fromPartition(name).fetch = async (url, opts = {}) => {
-        if (new URL(url).origin !== origin) throw new Error("Unexpected synthetic Bouty origin");
-        const pathname = new URL(url).pathname;
-        if (pathname === "/login" && opts.method === "POST") return new Response("", { status: 302, headers: { location: origin + "/dashboard" } });
-        if (pathname === "/login") return new Response('<input name="_token" value="token">');
-        if (pathname === "/attendance") return new Response('<meta name="csrf-token" content="token"><body data-current-user-id="1">' + attendanceDay);
-        if (pathname === "/students") return new Response(roster());
-        if (pathname === "/enrollments") return new Response(enrollments);
-        if (pathname === "/attendance/days/students/22") return new Response('<a href="/student-attendance/groups/8">group</a>');
-        if (pathname === "/student-attendance/groups/8") {
-          return new Response('<table><tr data-attendance-type="student" data-attendance-entity-id="31"><td><select><option value="1">حاضر</option></select></td></tr></table>');
-        }
-        if (pathname === "/attendance/offline-sync") {
-          const [operation] = JSON.parse(opts.body).operations;
-          globalThis.boutyTestAttendance.push(operation);
-          return Response.json({ results: [{ client_operation_id: operation.client_operation_id, status: "synced" }] });
-        }
-        if (pathname === "/livewire-test/update") {
-          const request = JSON.parse(opts.body).components[0], state = JSON.parse(request.snapshot);
-          const action = request.calls[0];
-          if (state.memo.name === "students.index" && action?.method === "edit") {
-            Object.assign(state.data, { editingId: action.params[0], first_name: "Website", last_name: "Student", notes: "معرف المصدر: 5", school_name: "Website School" });
-          }
-          if (state.memo.name === "enrollments.index" && action?.method === "edit") Object.assign(state.data, { student_id: 9, status: "active" });
-          const rendered = state.memo.name === "students.index" ? roster(action?.method === "gotoPage" ? action.params[0] : 1, request.updates.search)
-            : state.memo.name === "enrollments.index" ? enrollments : attendanceDay;
-          const body = { components: [{ snapshot: JSON.stringify(state), effects: { html: rendered } }] };
-          return new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
-        }
-        throw new Error(`Unexpected synthetic Bouty request: ${pathname}`);
-      };
-    }
-  });
+async function signIn(app, username = "synthetic-user") {
+  await app.page.locator("#bouty-user").fill(username);
+  await app.page.locator("#bouty-password").fill("synthetic-password");
+  await app.page.locator("#save-bouty").click();
+  await expect(app.page.locator("#bouty-status")).toHaveText("Signed in to Bouty");
 }
 
-test("Bouty roster can refresh, open a profile, and mark attendance on the website", async ({ app }) => {
-  await mockBouty(app.electron);
+test("Bouty sign-in persists and sign-out clears credentials across restart", async ({ app }) => {
   await app.page.locator("#settings").click();
-  await app.page.locator("#destination-bouty").click();
+  await app.page.locator("#bouty-user").fill("synthetic-user");
+  await app.page.locator("#bouty-password").fill("incorrect");
+  await app.page.locator("#save-bouty").click();
+  await expect(app.page.locator("#error")).toHaveText("Bouty login failed.");
+  await signIn(app);
+  const credentials = path.join(app.home, "Masjid/v1/config/bouty-account.enc");
+  expect((await readFile(credentials)).includes(Buffer.from("synthetic-password"))).toBe(false);
+  await app.restart();
+  await app.page.locator("#settings").click();
+  await expect(app.page.locator("#bouty-status")).toHaveText("Signed in to Bouty");
+  await expect(app.page.locator("#bouty-password")).toBeHidden();
+  await app.page.locator("#attendance").click();
+  await app.page.locator("#mark-manual").click();
+  await expect(app.page.locator("#manual-list")).toContainText("Website Student");
+  await app.electron.evaluate(() => { globalThis.boutyTestExpired = true; });
+  await app.page.locator("#bouty-roster-refresh").click();
+  await expect(app.page.locator("#manual-list")).toContainText("Website Student");
+  expect(await app.electron.evaluate(() => globalThis.boutyTestLogins)).toBe(2);
+  await app.page.locator("#settings").click();
+  await app.page.locator("#sign-out-bouty").click();
+  await expect(app.page.locator("#bouty-status")).toHaveText("Signed out of Bouty");
+  await expect.poll(() => app.electron.evaluate(() => globalThis.boutyTestLogouts)).toBe(1);
+  await expect(readFile(credentials)).rejects.toMatchObject({ code: "ENOENT" });
+  await app.restart();
+  await app.page.locator("#settings").click();
+  await expect(app.page.locator("#bouty-status")).toHaveText("Signed out of Bouty");
+  await expect(app.page.locator("#bouty-password")).toHaveValue("");
+  expect(await app.electron.evaluate(() => globalThis.boutyTestLogins)).toBe(0);
+});
+
+test("Bouty keeps offline attendance with the original account", async ({ app }) => {
+  const file = path.join(app.home, "Masjid/v1/config/bouty-outbox.json");
+  await app.page.locator("#settings").click();
+  await signIn(app);
+  await app.page.locator("#attendance").click();
+  await app.electron.evaluate(() => { globalThis.boutyTestOffline = true; });
+  await app.page.locator("#mark-manual").click();
+  await app.page.locator("#manual-list button").click();
+  await app.page.locator("#confirm-ok").click();
+  await expect(app.page.locator("#today-list")).toContainText("Website Student");
+  await expect.poll(async () => JSON.parse(await readFile(file, "utf8")).items.length).toBe(1);
+  await app.restart();
+  await expect(app.page.locator("#today-list")).toContainText("Website Student");
+  await expect.poll(() => app.electron.evaluate(() => globalThis.boutyTestAttendance.length)).toBe(1);
+
+  await app.electron.evaluate(() => { globalThis.boutyTestOffline = true; });
+  await app.page.locator("#today-list .today-undo").click();
+  await app.page.locator("#confirm-ok").click();
+  await expect(app.page.locator("#today-count")).toHaveText("0");
+  await app.page.locator("#settings").click();
+  await app.page.locator("#sign-out-bouty").click();
+  await expect(app.page.locator("#bouty-status")).toHaveText("Signed out of Bouty");
+  await app.electron.evaluate(() => { globalThis.boutyTestOffline = false; });
+  await signIn(app, "synthetic-other");
+  expect(await app.electron.evaluate(() => globalThis.boutyTestAttendance.length)).toBe(1);
+  expect(JSON.parse(await readFile(file, "utf8")).items).toHaveLength(1);
+  await app.page.locator("#sign-out-bouty").click();
+  await expect(app.page.locator("#bouty-status")).toHaveText("Signed out of Bouty");
+  await signIn(app);
+  await expect.poll(() => app.electron.evaluate(() => globalThis.boutyTestAttendance.at(-1)?.status_id)).toBe(2);
+});
+
+test("Bouty roster can refresh, open a profile, and mark attendance on the website", async ({ app }) => {
+  await app.page.locator("#settings").click();
   await app.page.locator("#bouty-user").fill("synthetic-user");
   await app.page.locator("#bouty-password").fill("synthetic-password");
   await app.page.locator("#save-bouty").click();
-  await expect(app.page.locator("#bouty-status")).toContainText("saved");
+  await expect(app.page.locator("#bouty-status")).toHaveText("Signed in to Bouty");
   await app.page.locator("#attendance").click();
   await app.page.locator("#mark-manual").click();
   const list = app.page.locator("#manual-list");
@@ -86,23 +101,23 @@ test("Bouty roster can refresh, open a profile, and mark attendance on the websi
     expect.objectContaining({ day_id: 22, entity_id: 31, status_id: 1 }),
   ]);
   await expect(app.page.locator("#today-list")).toContainText("Website Student");
-  await expect.poll(() => app.sheets.grid("AttendanceLog").rows.length).toBeGreaterThan(1);
+  await expect(app.page.locator("#last-fields")).toContainText("Website School");
+  expect(app.captures).toEqual([]);
+  expect(await app.electron.evaluate(() => globalThis.boutyTestLogins)).toBe(1);
+  expect(app.sheets.requests).toEqual([]);
 });
 
 test("Bouty picker and scan card use website student information", async ({ app }) => {
-  await mockBouty(app.electron);
   await app.page.locator("#settings").click();
-  await app.page.locator("#destination-bouty").click();
   await app.page.locator("#bouty-user").fill("synthetic-user");
   await app.page.locator("#bouty-password").fill("synthetic-password");
   await app.page.locator("#save-bouty").click();
-  await expect(app.page.locator("#bouty-status")).toContainText("saved");
+  await expect(app.page.locator("#bouty-status")).toHaveText("Signed in to Bouty");
   const index = await readFile(path.join(app.prints, "index.json"), "utf8").then(JSON.parse).catch(() => ({ students: {} }));
   index.pending = { capturedAt: "2026-10-12T13:55:03.000Z" };
   await writeFile(path.join(app.prints, "index.json"), JSON.stringify(index));
   await writeFile(path.join(app.prints, "pending.txt"), "synthetic-print");
   await app.restart();
-  await mockBouty(app.electron);
   await expect(app.page.locator("#pending")).toBeVisible();
   await app.page.locator("#search").fill("Website");
   await expect(app.page.locator("#list button")).toHaveCount(1);
@@ -110,8 +125,5 @@ test("Bouty picker and scan card use website student information", async ({ app 
   await app.page.locator("#list button").click();
   await expect(app.page.locator("#last-name")).toHaveText("Website Student");
   await expect(app.page.locator("#last-fields")).toContainText("Website School");
-  await expect.poll(() => app.sheets.grid("AttendanceLog").rows.length).toBeGreaterThan(1);
-  expect(app.sheets.grid("AttendanceLog").rows[1][2]).toBe("12/10/2026 16:55:03");
-  await expect.poll(() => app.sheets.grid("FingerPrints").rows.length).toBeGreaterThan(1);
-  expect(app.sheets.requests.some((request) => String(request.url).includes("attendance-test"))).toBe(false);
+  expect(app.sheets.requests).toEqual([]);
 });

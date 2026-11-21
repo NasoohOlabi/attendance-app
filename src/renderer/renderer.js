@@ -61,7 +61,6 @@ const confirmProfileChips = document.querySelector("#confirm-profile-chips");
 const confirmProfileFields = document.querySelector("#confirm-profile-fields");
 const confirmCancel = document.querySelector("#confirm-cancel");
 const confirmOk = document.querySelector("#confirm-ok");
-const syncStudents = document.querySelector("#sync-students");
 const dashboard = document.querySelector("#dashboard");
 const dashboardView = document.querySelector("#dashboard-view");
 const dashboardClose = document.querySelector("#dashboard-close");
@@ -312,16 +311,6 @@ async function choose(key) {
 function fillConfig(state) {
   const cfg = state.config || {};
   document.querySelector("#app-version").textContent = state.appVersion || state.update?.version || "—";
-  const destination = cfg.attendanceDestination === "bouty" ? "bouty" : "sheet";
-  for (const button of document.querySelectorAll("[data-destination]")) {
-    button.setAttribute("aria-pressed", String(button.dataset.destination === destination));
-  }
-  showDestinationFields();
-  document.querySelector("#cfg-sheet").value = cfg.spreadsheetId || "";
-  document.querySelector("#cfg-gid").value = cfg.sheetGid ?? "";
-  document.querySelector("#cfg-log-sheet").value = cfg.logSpreadsheetId || "";
-  document.querySelector("#cfg-log-gid").value = cfg.logSheetGid ?? "";
-  document.querySelector("#cfg-print-gid").value = cfg.fingerprintSheetGid ?? "";
   document.querySelector("#cfg-exe").value = cfg.zk4500Cli || "";
   document.querySelector("#cfg-dir").textContent = state.fingerprintDir || cfg.fingerprintDir || "";
   for (const button of document.querySelectorAll("[data-track]")) button.setAttribute("aria-pressed", String(button.dataset.track === (cfg.updateChannel || "stable")));
@@ -332,75 +321,6 @@ function fillConfig(state) {
   document.querySelector("#bouty-user").value = "";
   document.querySelector("#bouty-password").value = "";
   cancel.hidden = !state.canCloseSettings;
-  chooseSettingsPage("general");
-}
-
-syncStudents.addEventListener("click", async () => {
-  syncStudents.disabled = true;
-  const result = await window.attendance.syncStudents();
-  syncStudents.disabled = false;
-  if (!result?.ok && result?.error) {
-    error.hidden = false;
-    error.textContent = translate(result.error);
-  }
-});
-
-function selectedDestination() {
-  return document.querySelector("[data-destination][aria-pressed='true']")?.dataset.destination || "sheet";
-}
-
-const SETTINGS_DETAIL = new Set([
-  "Google account, spreadsheet, gid, and scanner.",
-  "Bouty account, Pages sheet, and scanner.",
-]);
-
-function showDestinationFields(status) {
-  const bouty = selectedDestination() === "bouty";
-  document.querySelector("#sheet-id-field").hidden = bouty;
-  document.querySelector("#sheet-gid-field").hidden = bouty;
-  document.querySelector("#bouty-fields").hidden = !bouty;
-  const sentence = bouty
-    ? "Bouty account, Pages sheet, and scanner."
-    : "Google account, spreadsheet, gid, and scanner.";
-  const text = status && !SETTINGS_DETAIL.has(status) ? status : sentence;
-  document.querySelector("#config-detail").textContent = translate(text);
-}
-
-for (const button of document.querySelectorAll("[data-destination]")) {
-  button.addEventListener("click", () => {
-    for (const candidate of document.querySelectorAll("[data-destination]")) {
-      candidate.setAttribute("aria-pressed", String(candidate === button));
-    }
-    showDestinationFields();
-  });
-}
-
-function chooseSettingsPage(page) {
-  document.querySelector("#settings-general").hidden = page !== "general";
-  document.querySelector("#settings-account").hidden = page !== "account";
-  document.querySelector("#save").hidden = page !== "general";
-  for (const tab of document.querySelectorAll("[data-settings-page]")) {
-    tab.setAttribute("aria-selected", String(tab.dataset.settingsPage === page));
-  }
-}
-
-let importingAccount = false;
-function renderServiceAccount(state) {
-  const account = state.config?.serviceAccount || { status: "missing" };
-  const messages = {
-    missing: "No service account imported.",
-    external: "An external key is configured. Import it to store an encrypted copy.",
-    imported: "Service account imported and encrypted.",
-    locked: "The saved account cannot be opened. Import it again for this Windows user.",
-  };
-  document.querySelector("#account-status").textContent = translate(importingAccount ? "Importing account…" : messages[account.status] || messages.missing);
-  const email = document.querySelector("#account-email");
-  email.textContent = account.email || "";
-  email.hidden = !account.email;
-  document.querySelector("#account-location").textContent = account.file || "";
-  const button = document.querySelector("#import-account");
-  button.disabled = importingAccount;
-  button.textContent = translate(account.status === "imported" ? "Replace account" : "Import JSON");
 }
 
 const ICONS = {
@@ -478,7 +398,7 @@ function renderToday(names) {
   }
   digits.textContent = known ? String(list.length) : "–";
   todayEmpty.hidden = list.length > 0;
-  todayEmpty.textContent = translate(known ? "No one yet" : "Loading the sheet");
+  todayEmpty.textContent = translate(known ? "No one yet" : "Loading attendance");
   const key = JSON.stringify(list);
   if (key === todayKey) return;
   todayKey = key;
@@ -489,13 +409,10 @@ function renderToday(names) {
       name.className = "today-name";
       name.dir = "auto";
       name.textContent = person.name;
-      const time = document.createElement("input");
+      const time = document.createElement("span");
       time.className = "today-time";
-      time.type = "time";
-      time.value = person.time;
+      time.textContent = person.time;
       time.dir = "ltr";
-      time.setAttribute("aria-label", translate(`Time for ${person.name}`));
-      time.addEventListener("change", () => saveTodayTime(person, time));
       const undo = document.createElement("button");
       undo.className = "today-undo";
       undo.type = "button";
@@ -553,7 +470,7 @@ async function undoToday(person) {
   const accepted = await askConfirm({
     title: "Remove from today?",
     name: person.name,
-    detail: "Today's cell is cleared. The time logged for today is removed. Other days stay.",
+    detail: "Set this student's attendance to Absent on Bouty.",
     confirmLabel: "Remove",
   });
   if (!accepted) return;
@@ -561,29 +478,6 @@ async function undoToday(person) {
   if (!result?.ok && result?.error) {
     error.hidden = false;
     error.textContent = translate(result.error);
-  }
-}
-
-async function saveTodayTime(person, input) {
-  if (!input.value || input.value === person.time) return;
-  if (typeof window.attendance.setAttendanceTime !== "function") {
-    error.hidden = false;
-    error.textContent = translate("Close the app and open it again, then change the time.");
-    input.value = person.time;
-    return;
-  }
-  const result = await window.attendance.setAttendanceTime({
-    studentId: person.studentId,
-    rowNumber: person.rowNumber,
-    logRow: person.logRow,
-    time: input.value,
-  });
-  if (!result?.ok) {
-    input.value = person.time;
-    if (result?.error) {
-      error.hidden = false;
-      error.textContent = translate(result.error);
-    }
   }
 }
 
@@ -609,16 +503,13 @@ function render(state) {
   const version = document.querySelector("#app-version");
   if (version) version.textContent = state.appVersion || state.update?.version || "—";
   renderUpdate(state.update);
-  renderServiceAccount(state);
-  document.querySelector("#bouty-status").textContent = translate(state.bouty?.message || (state.bouty?.enabled ? "Bouty account saved." : "Bouty is not configured."));
+  const signedIn = Boolean(state.bouty?.enabled);
+  document.querySelector("#bouty-sign-in").hidden = signedIn;
+  document.querySelector("#sign-out-bouty").hidden = !signedIn;
+  document.querySelector("#save-bouty").hidden = signedIn;
+  document.querySelector("#bouty-advanced").hidden = !signedIn;
+  document.querySelector("#bouty-status").textContent = translate(signedIn ? "Signed in to Bouty" : "Signed out of Bouty");
   const mode = screenForPhase(state.phase);
-  const website = state.config?.attendanceDestination === "bouty";
-  const manualLabel = website ? "Browse Bouty students" : "Mark without a finger";
-  const searchLabel = website ? "Type a name or student number" : "Type a name";
-  markManual.dataset.i18n = manualLabel;
-  markManual.textContent = translate(manualLabel);
-  manualSearch.dataset.i18nPlaceholder = searchLabel;
-  manualSearch.placeholder = translate(searchLabel);
   const enteredPicker = mode === "pending" && !picker;
   const enteredConfig = mode === "config" && !configOpen;
   picker = mode === "pending";
@@ -690,10 +581,10 @@ function render(state) {
   if (mode === "config") {
     cancel.hidden = !state.canCloseSettings;
     if (enteredConfig) fillConfig(state);
-    showDestinationFields(state.detail);
+    document.querySelector("#config-detail").textContent = translate(state.detail || "Bouty account and scanner.");
   }
   if (mode === "prints") {
-    document.querySelector("#prints-detail").textContent = translate(state.detail || "Remove one student's prints from this computer and the fingerprints sheet.");
+    document.querySelector("#prints-detail").textContent = translate(state.detail || "Remove one student's fingerprints from this computer.");
     if (enteredPrints) {
       printsSearch.value = "";
       refreshPrints();
@@ -701,7 +592,7 @@ function render(state) {
   }
   error.hidden = !state.error;
   error.textContent = translate(state.error || "");
-  sync.textContent = [state.syncNote, state.bouty?.message].filter(Boolean).map(translate).join(" · ");
+  sync.textContent = translate(state.bouty?.message || "");
 }
 
 dashboard.addEventListener("click", async () => {
@@ -739,13 +630,10 @@ let searchTimer;
 search.addEventListener("input", () => {
   clearTimeout(searchTimer);
   filterGen += 1;
-  if (lastState?.config?.attendanceDestination === "bouty") {
-    list.replaceChildren();
-    empty.hidden = false;
-    empty.textContent = translate("Searching Bouty…");
-    searchTimer = setTimeout(() => refreshList(), 350);
-  }
-  else void refreshList();
+  list.replaceChildren();
+  empty.hidden = false;
+  empty.textContent = translate("Searching Bouty…");
+  searchTimer = setTimeout(() => refreshList(), 350);
 });
 search.addEventListener("keydown", (event) => {
   if (event.key !== "Enter") return;
@@ -847,7 +735,7 @@ async function removePrints(student) {
   const accepted = await askConfirm({
     title: "Delete this student's fingerprints?",
     name: student.studentName || student.studentId,
-    detail: "This student's prints are removed from this computer and the fingerprints sheet. Attendance is not changed.",
+    detail: "Remove this student's saved fingerprints from this computer.",
     confirmLabel: "Delete fingerprints",
   });
   if (!accepted) return;
@@ -901,7 +789,7 @@ document.querySelector("#clear-prints").addEventListener("click", async () => {
   }
   const accepted = await askConfirm({
     title: "Delete all fingerprints?",
-    detail: "Prints on this computer and on the fingerprints sheet are removed. The attendance sheet is not changed.",
+    detail: "Remove all saved fingerprints from this computer.",
     confirmLabel: "Delete fingerprints",
   });
   if (!accepted) return;
@@ -920,12 +808,6 @@ document.querySelector("#save").addEventListener("click", async () => {
   const save = document.querySelector("#save");
   save.disabled = true;
   const result = await window.attendance.saveConfig({
-    attendanceDestination: selectedDestination(),
-    spreadsheetId: document.querySelector("#cfg-sheet").value,
-    sheetGid: document.querySelector("#cfg-gid").value,
-    logSpreadsheetId: document.querySelector("#cfg-log-sheet").value,
-    logSheetGid: document.querySelector("#cfg-log-gid").value,
-    fingerprintSheetGid: document.querySelector("#cfg-print-gid").value,
     zk4500Cli: document.querySelector("#cfg-exe").value,
     updateChannel: document.querySelector('[data-track][aria-pressed="true"]')?.dataset.track || "stable",
   });
@@ -938,11 +820,8 @@ document.querySelector("#save").addEventListener("click", async () => {
 for (const button of document.querySelectorAll("[data-track]")) button.addEventListener("click", () => {
   for (const candidate of document.querySelectorAll("[data-track]")) candidate.setAttribute("aria-pressed", String(candidate === button));
 });
-for (const tab of document.querySelectorAll("[data-settings-page]")) {
-  tab.addEventListener("click", () => chooseSettingsPage(tab.dataset.settingsPage));
-}
-document.querySelector("#save-bouty").addEventListener("click", async () => {
-  const button = document.querySelector("#save-bouty");
+async function saveBouty(event) {
+  const button = event.currentTarget;
   button.disabled = true;
   try {
     const result = await window.attendance.saveBouty({ username: document.querySelector("#bouty-user").value,
@@ -950,25 +829,22 @@ document.querySelector("#save-bouty").addEventListener("click", async () => {
     if (!result?.ok) { error.hidden = false; error.textContent = translate(result?.error || "Bouty settings could not be saved."); }
     else { document.querySelector("#bouty-password").value = ""; error.hidden = true; }
   } finally { button.disabled = false; }
-});
-document.querySelector("#import-account").addEventListener("click", async () => {
-  importingAccount = true;
-  renderServiceAccount(lastState || {});
+}
+document.querySelector("#save-bouty").addEventListener("click", saveBouty);
+document.querySelector("#save-bouty-advanced").addEventListener("click", saveBouty);
+document.querySelector("#sign-out-bouty").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
   try {
-    const result = await window.attendance.importServiceAccount();
-    if (!result?.ok && !result?.canceled) {
+    const result = await window.attendance.signOutBouty();
+    if (!result?.ok) {
       error.hidden = false;
-      error.textContent = translate(result?.error || "The account could not be imported.");
-    } else if (result?.ok) {
-      error.hidden = true;
+      error.textContent = translate(result?.error || "Bouty could not sign out.");
+    } else {
+      document.querySelector("#bouty-user").value = "";
+      document.querySelector("#bouty-password").value = "";
     }
-  } catch {
-    error.hidden = false;
-    error.textContent = translate("The account could not be imported.");
-  } finally {
-    importingAccount = false;
-    renderServiceAccount(lastState || {});
-  }
+  } finally { button.disabled = false; }
 });
 for (const button of document.querySelectorAll("[data-pick]")) {
   button.addEventListener("click", async () => {
@@ -996,7 +872,7 @@ function chooseLang(lang) {
   if (lastState) render(lastState);
 }
 
-function renderManualList(students, website) {
+function renderManualList(students) {
   manualList.replaceChildren();
   for (const student of students) {
     const item = document.createElement("li");
@@ -1008,10 +884,10 @@ function renderManualList(students, website) {
     const sub = document.createElement("span");
     sub.className = "sub";
     sub.dir = "ltr";
-    const identifier = website ? student.studentNumber : student.studentId;
+    const identifier = student.studentNumber;
     sub.textContent = identifier && identifier !== student.studentName ? identifier : "";
     button.append(name, sub);
-    button.addEventListener("click", () => website ? openBoutyProfile(student) : confirmManual(student));
+    button.addEventListener("click", () => openBoutyProfile(student));
     item.append(button);
     manualList.append(item);
   }
@@ -1020,25 +896,20 @@ function renderManualList(students, website) {
 async function refreshManual() {
   clearTimeout(manualSearchTimer);
   const gen = ++manualGen;
-  const website = lastState?.config?.attendanceDestination === "bouty";
-  boutyRosterActions.hidden = !website;
-  if (website) {
-    manualList.replaceChildren();
-    manualEmpty.hidden = false;
-    manualEmpty.textContent = translate("Searching Bouty…");
-    boutyRosterPrev.disabled = true;
-    boutyRosterNext.disabled = true;
-    boutyRosterRefresh.disabled = true;
-  }
-  const result = website
-    ? await window.attendance.boutyRoster({ query: manualSearch.value, page: boutyRosterPage })
-    : await window.attendance.filter(manualSearch.value);
+  boutyRosterActions.hidden = false;
+  manualList.replaceChildren();
+  manualEmpty.hidden = false;
+  manualEmpty.textContent = translate("Searching Bouty…");
+  boutyRosterPrev.disabled = true;
+  boutyRosterNext.disabled = true;
+  boutyRosterRefresh.disabled = true;
+  const result = await window.attendance.boutyRoster({ query: manualSearch.value, page: boutyRosterPage });
   if (gen !== manualGen || manualPick.hidden) return;
-  const students = Array.isArray(result) ? result : result?.students || [];
-  const problem = Array.isArray(result) ? "" : result?.error || "";
+  const students = result?.students || [];
+  const problem = result?.error || "";
   manualEmpty.hidden = students.length !== 0 && !problem;
   manualEmpty.textContent = translate(problem || "No matching students");
-  renderManualList(problem ? [] : students, website);
+  renderManualList(problem ? [] : students);
   boutyRosterPrev.disabled = boutyRosterPage <= 1;
   boutyRosterNext.disabled = !result?.hasNext;
   boutyRosterRefresh.disabled = false;
@@ -1054,17 +925,17 @@ async function openBoutyProfile(student) {
   for (const button of manualList.querySelectorAll("button")) button.disabled = false;
   manualEmpty.hidden = !profile.error;
   manualEmpty.textContent = translate(profile.error || "");
-  if (!profile.error) await confirmManual(profile, true);
+  if (!profile.error) await confirmManual(profile);
 }
 
-async function confirmManual(student, website = false) {
+async function confirmManual(student) {
   const accepted = await askConfirm({
-    title: website ? "Student details" : "Mark without a finger?",
+    title: "Student details",
     name: student.studentName || "",
     id: student.studentId || "",
-    detail: website && !student.studentId ? "Bouty students need an unambiguous source ID." : "",
+    detail: !student.studentId ? "Bouty students need an unambiguous source ID." : "",
     fields: student.fields,
-    canConfirm: !website || Boolean(student.studentId),
+    canConfirm: Boolean(student.studentId),
     confirmLabel: "Mark present",
     tone: "primary",
   });
@@ -1094,7 +965,6 @@ markManual.addEventListener("click", () => {
 manualSearch.addEventListener("input", () => {
   manualPick.hidden = false;
   boutyRosterPage = 1;
-  if (lastState?.config?.attendanceDestination !== "bouty") return refreshManual();
   manualGen += 1;
   manualList.replaceChildren();
   boutyRosterPrev.disabled = true;

@@ -8,90 +8,16 @@ import { createBoutyClient } from "../bouty.mjs";
 import { createBoutyCredentials, createBoutyQueue, parseBoutyMapping } from "../bouty-storage.mjs";
 import { createBoutySync } from "../bouty-sync.mjs";
 import { applyBoutyProfile, boutyStudentChoices } from "../bouty-resolve.mjs";
-import { createCredentialStore, credentialFile } from "../credentials.mjs";
 import { legacyUserDataPath, loadConfig, scannerExeInResources, updateChannelPreferencePath } from "../config.mjs";
 import { appLogFile, startAppLog } from "../log.mjs";
 import { updaterChannel, updaterErrorDetails, updaterInfoDetails, updaterShouldOffer } from "../update.mjs";
-import {
-  createGoogle,
-  describeApiFailure,
-  explainApiFailure,
-  isOfflineError,
-  sheetOfflineNote,
-  isSheetPermissionError,
-  appendSheetRow,
-  clearSheetBelowHeader,
-  deleteSheetRows,
-  ensureDateColumn,
-  getDateHeader,
-  getSheetGrid,
-  writeAttendanceCell,
-  writeSheetCell,
-  writeSheetValues,
-} from "../google.mjs";
 import { appendScanTrace, beginScanAttempt, mergeCapturedFiles, planScanRetry, runIdentify, SCAN_OUTAGE_MESSAGE, SCAN_RETRY_PAUSE_MS } from "../scan.mjs";
-import { attendanceTrend } from "../trend.mjs";
+import { createHash } from "node:crypto";
 import {
-  captureScreen,
-  findDateColumn,
-  fuzzyStudents,
-  clearFingerprints,
-  loadIndex,
-  mergeStudents,
-  nextGoogleAttendance,
-  attendanceLogRow,
-  attendanceStamp,
-  attachLogTimes,
-  canonicalStudentId,
-  clocksFromAppLog,
-  clockFromStamp,
-  columnLetter,
-  FINGERPRINT_HEADER,
-  fingerprintFiles,
-  fingerprintRowNumbers,
-  fingerprintHeaderMissing,
-  fingerprintSheetRow,
-  attendanceCellPresent,
-  logHits,
-  logLayout,
-  overlayPresent,
-  pendingPrintDeletes,
-  personOnList,
-  presentLogAction,
-  printsToRestore,
-  queueAbsent,
-  queueClock,
-  queueManualPresent,
-  queuePresent,
-  queuePrintDelete,
-  queuePrintDeleteAll,
-  forgetQueuedPrintDelete,
-  snapshotRows,
-  todayPeople,
-  todayRecord,
-  queuedAttendanceStamp,
-  stampFromClock,
-  withScanTimes,
-  parseAttendanceGrid,
-  presentToday,
-  presentFromLog,
-  studentProfile,
-  pendingPath,
-  planAttendance,
-  putStudent,
-  readStudents,
-  saveIndex,
-  sheetProblem,
-  studentKey,
-  planBatchFiles,
-  planStudentPrintDelete,
-  localFilesAfterSheetDelete,
-  dropPrintEnrollment,
-  studentsWithPrints,
-  studentTemplateNames,
-  templateFileForStudent,
-  templatePath,
-  writeLog,
+  attendanceStamp, canonicalStudentId, captureScreen, clearFingerprints, clockFromStamp,
+  dropPrintEnrollment, fuzzyStudents, loadIndex, outboxDay, pendingPath, personOnList,
+  planBatchFiles, planStudentPrintDelete, putStudent, saveIndex, studentsWithPrints,
+  studentKey, studentTemplateNames, templateFileForStudent, templatePath, writeLog,
 } from "../store.mjs";
 
 const mainDir = path.dirname(fileURLToPath(import.meta.url));
@@ -110,7 +36,6 @@ let batchImages = [];
 let batchTokens = [];
 
 let win = null;
-let client = null;
 let currentConfig = null;
 let cached = {};
 let pending = null;
@@ -125,9 +50,6 @@ let appRunning = true;
 let quitRequested = false;
 let printsEpoch = 0;
 let lock = Promise.resolve();
-let sheetDenied = false;
-let sheetReported = false;
-let attendanceRows = [];
 let scannerReady = true;
 let scanFailStreak = 0;
 let updateProgressLog = -1;
@@ -147,26 +69,37 @@ let boutyEnabled = false;
 let boutySettings = { mapping: [], days: {}, presentStatusId: 1, absentStatusId: 2 };
 let boutyMessage = "";
 let boutyContext = null;
-let boutyLookup = null;
+let boutySession = null;
+let boutyQueue = null;
+let boutyOwner = null;
+let boutySigningOut = false;
+let present = [];
 let boutyLookupTail = Promise.resolve();
 let boutyAccountVersion = 0;
 const boutyNames = new Map();
 let boutySearch = { query: "", until: 0, promise: null };
 
-function withBoutyLookup(fn) {
-  const version = boutyAccountVersion;
-  const run = boutyLookupTail.then(async () => {
-    if (version !== boutyAccountVersion) throw new Error("Bouty account changed.");
-    const account = await boutyCredentials?.read();
-    if (!account || !boutyLookup) throw new Error("Bouty: sign in to look up students.");
-    await boutyLookup.session.clearStorageData({ storages: ["cookies"] });
-    await boutyLookup.client.login(account.username, account.password);
-    const result = await fn(boutyLookup.client);
-    if (version !== boutyAccountVersion) throw new Error("Bouty account changed.");
-    return result;
-  });
+function accountKey(username) {
+  return createHash("sha256").update(username.trim().toLowerCase()).digest("hex");
+}
+
+function serialBouty(fn) {
+  const run = boutyLookupTail.then(fn);
   boutyLookupTail = run.catch(() => {});
   return run;
+}
+
+function withBoutyLookup(fn) {
+  const version = boutyAccountVersion;
+  return serialBouty(async () => {
+    if (version !== boutyAccountVersion || boutySigningOut) throw new Error("Bouty account changed.");
+    const account = await boutyCredentials?.read();
+    if (!account || !boutySession) throw new Error("Bouty: sign in to look up students.");
+    await boutySession.client.login(account.username, account.password);
+    const result = await boutySession.run(fn);
+    if (boutySigningOut) throw new Error("Bouty account changed.");
+    return result;
+  });
 }
 
 function loadBoutyProfile(student, at) {
@@ -174,13 +107,11 @@ function loadBoutyProfile(student, at) {
   if (!id) return;
   void withBoutyLookup((api) => api.student({ studentId: id, studentName: student.studentName || "" }))
     .then((profile) => {
-      if (currentConfig?.attendanceDestination !== "bouty") return;
       boutyNames.set(id, profile.studentName);
-      sheetPeople = sheetPeople.map((person) => canonicalStudentId(person.studentId) === id ? { ...person, name: profile.studentName } : person);
-      const match = applyBoutyProfile(state.lastMatch, at, id, profile, currentConfig?.attendanceDestination);
+      const match = applyBoutyProfile(state.lastMatch, at, id, profile, "bouty");
       if (match) publish({ lastMatch: match, present: shownPresent() });
     }).catch(() => {
-      if (currentConfig?.attendanceDestination !== "bouty" || state.lastMatch?.at !== at || canonicalStudentId(state.lastMatch?.studentId) !== id) return;
+      if (!boutyEnabled || state.lastMatch?.at !== at || canonicalStudentId(state.lastMatch?.studentId) !== id) return;
       publish({ lastMatch: { ...state.lastMatch, profileStatus: "Bouty student information is unavailable." } });
     });
 }
@@ -205,27 +136,63 @@ async function setupBouty() {
   } catch (err) {
     if (err.code !== "ENOENT") publishBouty("Bouty settings could not be read.");
   }
-  try { boutyEnabled = Boolean(await boutyCredentials.read()); }
-  catch {
+  boutyQueue = createBoutyQueue(path.join(dir, "bouty-outbox.json"));
+  try {
+    const account = await boutyCredentials.read();
+    if (account) {
+      boutyOwner = accountKey(account.username);
+      await boutyQueue.claimLegacy(boutyOwner);
+      boutyEnabled = true;
+    }
+  } catch {
     try { await access(path.join(dir, "bouty-account.enc")); boutyEnabled = true; } catch { boutyEnabled = false; }
     publishBouty("Bouty account could not be opened.");
   }
-  const browserSession = session.fromPartition("bouty-attendance");
-  const profileSession = session.fromPartition("bouty-students");
-  boutyLookup = { session: profileSession, client: createBoutyClient((url, options) => profileSession.fetch(url, options)) };
+  const browserSession = session.fromPartition("bouty-students");
   const api = createBoutyClient((url, options) => browserSession.fetch(url, options));
-  const client = { ...api, async login(username, password) {
-    await browserSession.clearStorageData({ storages: ["cookies"] });
-    await api.login(username, password);
-  } };
+  let active = false;
+  const clearCookies = () => browserSession.clearStorageData({ storages: ["cookies"] });
+  boutySession = {
+    async signIn(username, password) {
+      active = false;
+      await clearCookies();
+      await api.login(username, password);
+      active = true;
+    },
+    async signOut() {
+      try { if (active) await api.logout(); }
+      catch { /* Local sign-out still works offline. */ }
+      finally { active = false; await clearCookies(); }
+    },
+    async run(fn) {
+      try { return await fn(boutySession.client); }
+      catch (error) {
+        if (error?.code !== "BOUTY_SESSION_EXPIRED") throw error;
+        active = false;
+        const account = await boutyCredentials.read();
+        if (!account || boutySigningOut) throw error;
+        await boutySession.signIn(account.username, account.password);
+        return fn(boutySession.client);
+      }
+    },
+    client: {
+      ...api,
+      async login(username, password) {
+        if (!active) await boutySession.signIn(username, password);
+      },
+    },
+  };
   boutySync = createBoutySync({
-    queue: createBoutyQueue(path.join(dir, "bouty-outbox.json")),
+    queue: boutyQueue,
     credentials: boutyCredentials,
-    client,
+    withSession: (run) => serialBouty(async () => {
+      if (!boutySigningOut && boutyEnabled) await boutySession.run(run);
+    }),
+    accountKey: () => boutyOwner,
     settings: async () => boutySettings,
     studentName: async (id) => {
       const index = await loadIndex(currentConfig?.fingerprintDir || path.join(homedir(), "Masjid", "v1", "fingerprints"));
-      return Object.values(index.students).find((student) => canonicalStudentId(student.studentId) === canonicalStudentId(id))?.studentName || "";
+      return Object.values(index.students).find((student) => canonicalStudentId(student.studentId) === id)?.studentName || "";
     },
     onStatus: publishBouty,
   });
@@ -242,7 +209,6 @@ let state = {
   scanImage: "",
   scanImages: [],
   error: "",
-  syncNote: "",
   fingerprintDir: "",
   config: null,
   canCloseSettings: false,
@@ -395,89 +361,8 @@ function publish(patch, gen) {
   if (win && !win.isDestroyed()) win.webContents.send("state", state);
 }
 
-let accountStore = null;
-let serviceAccount = { status: "missing", email: "", file: "" };
-
-function credentialStore(config) {
-  const file = credentialFile(config.fingerprintDir);
-  if (!accountStore || accountStore.file !== file) accountStore = createCredentialStore({ file, encryption: safeStorage });
-  return accountStore;
-}
-
-async function refreshServiceAccount(config) {
-  const file = credentialStore(config).file;
-  try {
-    const credentials = await credentialStore(config).read();
-    serviceAccount = credentials
-      ? { status: "imported", email: credentials.client_email, file }
-      : { status: config.serviceAccountJson ? "external" : "missing", email: await accountEmail(config), file };
-  } catch (error) {
-    serviceAccount = { status: "locked", email: "", file, error: error.message };
-  }
-}
-
 function publicConfig(config) {
-  return {
-    attendanceDestination: config.attendanceDestination,
-    serviceAccountJson: config.serviceAccountJson || "",
-    serviceAccount,
-    spreadsheetId: config.spreadsheetId || "",
-    sheetGid: config.sheetGid,
-    logSpreadsheetId: config.logSpreadsheetId || "",
-    logSheetGid: config.logSheetGid,
-    fingerprintSheetGid: config.fingerprintSheetGid,
-    zk4500Cli: config.zk4500Cli || "",
-    fingerprintDir: config.fingerprintDir,
-    scanTimeoutSeconds: config.scanTimeoutSeconds,
-    syncIntervalSeconds: config.syncIntervalSeconds,
-    updateChannel: config.updateChannel,
-  };
-}
-
-async function accountEmail(config) {
-  try {
-    const credentials = await credentialStore(config).read();
-    if (credentials) return credentials.client_email;
-    const parsed = JSON.parse(await readFile(config.serviceAccountJson, "utf8"));
-    return parsed.client_email || "";
-  } catch {
-    return "";
-  }
-}
-
-async function failureNote(config, err) {
-  return explainApiFailure(err?.message || "", await accountEmail(config));
-}
-
-/** A Google failure is a sentence plus a short line. Any other failure stays that one sentence. */
-function sheetWindow(described, { keepDetail = false } = {}) {
-  const developer = described.developer && described.developer !== described.operator ? described.developer : "";
-  const patch = { error: developer || described.operator };
-  if (keepDetail) patch.syncNote = outbox.length ? "Waiting to sync" : described.operator;
-  else if (developer) patch.syncNote = described.operator;
-  if (patch.syncNote === patch.error) delete patch.syncNote;
-  return patch;
-}
-
-/** The full request stays in the diagnostic log. The window gets one sentence and one short line. */
-async function publishSheetFailure(config, err, { gen, keepDetail = false } = {}) {
-  const message = err?.message || String(err || "");
-  console.error(message);
-  if (publishOffline(message, gen)) return;
-  const described = describeApiFailure(message, await accountEmail(config));
-  publish(sheetWindow(described, { keepDetail }), gen);
-}
-
-function publishOffline(message, gen) {
-  const note = sheetOfflineNote(message, outbox.length > 0);
-  if (!note) return false;
-  const patch = { syncNote: note, error: "" };
-  if (String(state.detail || "").startsWith("Syncing")) patch.detail = "Listening";
-  if (savedScreen && String(savedScreen.detail || "").startsWith("Syncing")) {
-    savedScreen = { ...savedScreen, detail: "Listening" };
-  }
-  publish(patch, gen);
-  return true;
+  return { zk4500Cli: config.zk4500Cli, fingerprintDir: config.fingerprintDir, updateChannel: config.updateChannel };
 }
 
 async function writeConfigFile(config, patch) {
@@ -515,633 +400,76 @@ async function saveUpdateChannelPreference(channel) {
   await rename(temp, file);
 }
 
-function cacheStudents(students) {
-  cached = {};
-  for (const student of Object.values(students || {})) {
-    if (!student) continue;
-    if (!String(student.studentId || "").trim() && !String(student.studentName || "").trim()) continue;
-    cached[studentKey(student)] = student;
-  }
-}
-
-function cacheFromSheet(merged, rows) {
-  cached = {};
-  const duplicates = new Set((merged.duplicates || []).map((id) => String(id).trim().toLowerCase()));
-  for (const sheet of readStudents(rows)) {
-    const local = duplicates.has(String(sheet.studentId).trim().toLowerCase()) ? {} : merged.students[studentKey(sheet)] || {};
-    cached[String(sheet.rowNumber)] = {
-      studentId: sheet.studentId || "",
-      studentName: sheet.studentName || "",
-      rowNumber: sheet.rowNumber,
-      templateFile: local.templateFile || "",
-      capturedAt: local.capturedAt || "",
-    };
-  }
-}
-
-function profileFieldsFor(student) {
-  if (!student || !attendanceRows.length) return [];
-  const grid = parseAttendanceGrid(attendanceRows);
-  const id = canonicalStudentId(student.studentId);
-  const rowNumber = Number(student.rowNumber);
-  const byRow = rowNumber ? grid.students.find((item) => item.rowNumber === rowNumber) : null;
-  const found = byRow || (id ? grid.students.find((item) => item.studentId === id) : null);
-  if (!found) return [];
-  return studentProfile(grid.header, attendanceRows[found.rowNumber - 1]).fields;
-}
-
 function lastMatchOf(student, at) {
-  return {
-    studentName: currentConfig?.attendanceDestination === "bouty" ? "" : student?.studentName || "",
-    studentId: student?.studentId || "",
-    at,
-    fields: currentConfig?.attendanceDestination === "bouty" ? [] : profileFieldsFor(student),
-    ...(currentConfig?.attendanceDestination === "bouty" ? { profileStatus: "Loading Bouty student information…" } : {}),
-  };
-}
-
-function viewStudent(student, names = []) {
-  const printCount = studentTemplateNames(student, names).length;
-  return {
-    key: student.rowNumber ? String(student.rowNumber) : studentKey(student),
-    studentId: student.studentId || "",
-    studentName: student.studentName || "",
-    hasPrint: printCount > 0 || Boolean(student.templateFile),
-    printCount,
-  };
-}
-
-function reportSheet(title, rows) {
-  if (sheetReported) return;
-  sheetReported = true;
-  const grid = parseAttendanceGrid(rows);
-  const today = findDateColumn(grid.header, new Date());
-  const dateText = (grid.header || [])
-    .map((cell) => String(cell).trim())
-    .filter((cell) => /^(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+\d{1,2}\/\d{1,2}$/i.test(cell) || /^\d{1,2}\/\d{1,2}$/.test(cell))
-    .join(" | ");
-  const names = grid.students.slice(0, 5).map((student) => student.studentName).join(" | ");
-  console.log(
-    `sheet tab ${JSON.stringify(title)} headerRow ${grid.headerRowNumber} summaryRow ${grid.summaryRowNumber} today ${today ? today.header : "missing"} dates ${dateText} names ${names} duplicates ${grid.duplicates.length}`,
-  );
-}
-
-async function reloadStudents(config) {
-  if (config.attendanceDestination === "bouty") {
-    const index = await loadIndex(config.fingerprintDir);
-    const students = Object.entries(index.students).sort(([a], [b]) => a.localeCompare(b))
-      .map(([, student], i) => ({ ...student, rowNumber: i + 1 }));
-    cached = Object.fromEntries(students.map((student) => [String(student.rowNumber), student]));
-    attendanceRows = [];
-    if (!config.logSpreadsheetId || config.logSheetGid === null) throw new Error("Configure the Pages attendance log.");
-    const log = await getSheetGrid(client, config.logSpreadsheetId, config.logSheetGid);
-    sheetPeople = presentFromLog(students.map((student) => ({ ...student, studentName: boutyNames.get(canonicalStudentId(student.studentId)) || "" })), log.rows, new Date());
-    rememberToday();
-    publish({ present: shownPresent() });
-    return { merged: index, rows: log.rows, title: log.title };
-  }
-  const { title, rows } = await getSheetGrid(client, config.spreadsheetId, config.sheetGid);
-  reportSheet(title, rows);
-  const problem = sheetProblem(rows);
-  if (problem) throw new Error(problem);
-  attendanceRows = rows;
-  const index = await loadIndex(config.fingerprintDir);
-  const merged = mergeStudents(index, rows);
-  await saveIndex(config.fingerprintDir, merged);
-  cacheFromSheet(merged, rows);
-  sheetPeople = await timesFor(config, presentToday(rows, new Date()));
-  rememberToday();
-  rememberSnapshot(rows);
-  publish({ present: shownPresent(), dashboard: attendanceTrend(rows) });
-  return { merged, rows, title };
-}
-
-let scanTimes = { day: "", rows: {} };
-let namedClocks = {};
-let sheetPeople = [];
-let outbox = [];
-let flushTail = Promise.resolve();
-let activeWrite = null;
-let outboxSaveTail = Promise.resolve();
-
-function scanTimesPath() {
-  return path.join(homedir(), "Masjid", "scan-times.json");
-}
-
-async function loadScanTimes() {
-  const day = attendanceStamp(new Date()).split(" ")[0];
-  scanTimes = { day, rows: {} };
-  try {
-    const saved = JSON.parse(await readFile(scanTimesPath(), "utf8"));
-    if (saved?.day === day && saved.rows) scanTimes = { day, rows: saved.rows };
-  } catch {
-    // No remembered scans yet today.
-  }
-  await loadOutbox();
-  await loadToday();
-  await loadSnapshot();
-  try {
-    namedClocks = clocksFromAppLog(await readFile(appLogFile(), "utf8"));
-  } catch {
-    namedClocks = {};
-  }
-}
-
-function rememberClock(rowNumber, clock) {
-  const row = Number(rowNumber);
-  const text = String(clock || "").trim();
-  if (!row || !/^\d{2}:\d{2}$/.test(text)) return;
-  const day = attendanceStamp(new Date()).split(" ")[0];
-  if (scanTimes.day !== day) scanTimes = { day, rows: {} };
-  scanTimes.rows[row] = text;
-  mkdir(path.dirname(scanTimesPath()), { recursive: true })
-    .then(() => writeFile(scanTimesPath(), JSON.stringify(scanTimes)))
-    .catch((err) => console.error(err.message));
-}
-
-function rememberScan(rowNumber, date) {
-  rememberClock(rowNumber, clockFromStamp(attendanceStamp(date)));
-}
-
-function forgetScan(rowNumber) {
-  delete scanTimes.rows[Number(rowNumber)];
-  writeFile(scanTimesPath(), JSON.stringify(scanTimes)).catch((err) => console.error(err.message));
-}
-
-function todayDay() {
-  return attendanceStamp(new Date()).split(" ")[0];
-}
-
-async function loadOutbox() {
-  outbox = [];
-  try {
-    const saved = JSON.parse(await readFile(masjidPath("attendance-outbox.json"), "utf8"));
-    if (Array.isArray(saved?.items)) outbox = saved.items;
-  } catch {
-    outbox = [];
-  }
-}
-
-function saveOutbox() {
-  return saveMasjid("attendance-outbox.json", { items: outbox });
-}
-
-function masjidPath(name) {
-  return path.join(homedir(), "Masjid", name);
-}
-
-function saveMasjid(name, value) {
-  const body = JSON.stringify(value);
-  const save = outboxSaveTail.then(async () => {
-    const file = masjidPath(name);
-    await mkdir(path.dirname(file), { recursive: true });
-    await writeFile(`${file}.tmp`, body);
-    await rename(`${file}.tmp`, file);
-  });
-  outboxSaveTail = save.catch(() => {});
-  return save;
-}
-
-function rememberToday() {
-  return saveMasjid("attendance-today.json", todayRecord(sheetPeople, todayDay()));
-}
-
-function rememberSnapshot(rows) {
-  return saveMasjid("sheet-snapshot.json", { rows });
-}
-
-async function loadToday() {
-  try {
-    sheetPeople = todayPeople(JSON.parse(await readFile(masjidPath("attendance-today.json"), "utf8")), todayDay());
-  } catch {
-    sheetPeople = [];
-  }
-}
-
-async function loadSnapshot() {
-  try {
-    attendanceRows = snapshotRows(JSON.parse(await readFile(masjidPath("sheet-snapshot.json"), "utf8")));
-  } catch {
-    attendanceRows = [];
-  }
-  state.dashboard = attendanceRows.length ? attendanceTrend(attendanceRows) : [];
-}
-
-function waitingNote() {
-  return outbox.length ? "Waiting to sync" : "";
+  return { studentName: "", studentId: student?.studentId || "", at, fields: [],
+    profileStatus: "Loading Bouty student information…" };
 }
 
 function shownPresent() {
-  const people = overlayPresent(sheetPeople, outbox, todayDay());
-  if (currentConfig?.attendanceDestination !== "bouty") return people;
-  return people.map((person) => ({ ...person, name: boutyNames.get(canonicalStudentId(person.studentId)) || person.name || person.studentId }));
+  return present.map((person) => ({ ...person, name: boutyNames.get(person.studentId) || person.name }));
 }
 
-function rosterStudent(student) {
-  const id = canonicalStudentId(student?.studentId);
-  return (
-    Object.values(cached).find((item) => canonicalStudentId(item.studentId) === id) || {
-      studentId: id || student?.studentId || "",
-      studentName: student?.studentName || "",
-      rowNumber: Number(student?.rowNumber) || 0,
-    }
-  );
+async function publishAttendance() {
+  const owner = boutyOwner;
+  const records = owner ? await boutyQueue.attendance() : [];
+  if (owner !== boutyOwner) return;
+  const days = new Map();
+  for (const record of records) {
+    if (record.owner !== owner) continue;
+    const day = outboxDay(record.at);
+    if (!days.has(day)) days.set(day, new Map());
+    const students = days.get(day);
+    if (record.kind === "absent") students.delete(record.studentId);
+    else students.set(record.studentId, {
+      studentId: record.studentId,
+      name: record.studentName || record.studentId,
+      time: clockFromStamp(attendanceStamp(new Date(record.at))),
+    });
+  }
+  present = [...(days.get(outboxDay(new Date()))?.values() || [])];
+  const dashboard = [...days].slice(-14).map(([label, students]) => ({ label, count: students.size }));
+  publish({ present: shownPresent(), dashboard });
 }
 
-function queuedFrom(student, extra = {}) {
-  const found = rosterStudent(student);
-  return {
-    studentId: canonicalStudentId(found.studentId) || found.studentId,
-    studentName: found.studentName || student?.studentName || "",
-    rowNumber: Number(found.rowNumber) || Number(student?.rowNumber) || 0,
-    at: new Date().toISOString(),
-    exactTime: true,
-    time: clockFromStamp(attendanceStamp(new Date())),
-    ...extra,
-  };
-}
-
-function publishShown(extra = {}) {
-  const syncNote = outbox.length ? "Waiting to sync" : state.syncNote === "Waiting to sync" ? "" : state.syncNote;
-  publish({ present: shownPresent(), syncNote, ...extra });
-}
-
-/** Show the mark now. The sheet write runs after this returns. */
 async function acceptPresent(student, at = new Date().toISOString()) {
-  const person = queuedFrom(student);
-  person.at = at;
-  person.destination = currentConfig?.attendanceDestination || "sheet";
-  if (!person.studentId) return { op: "missing-id" };
-  if (person.destination === "bouty") {
-    person.studentName = boutyNames.get(person.studentId) || person.studentName;
-  }
-  const next = queueManualPresent(outbox, sheetPeople, person, activeWrite);
-  if (next === outbox) {
-    publishShown({ detail: "Already here today." });
-    return { op: "update", value: "حاضر" };
-  }
-  if (person.destination === "bouty" && boutySync) {
-    try { await boutySync.enqueue(person.studentId, "present", person.at, person.studentName); void boutySync.sync(); }
-    catch { throw new Error("Bouty: attendance could not be queued."); }
-  }
-  outbox = next;
-  if (person.rowNumber) rememberScan(person.rowNumber, new Date());
-  saveOutbox().catch((err) => console.error(err.message));
-  publishShown();
-  void flushOutbox();
-  return { op: "update", value: "حاضر" };
-}
-
-function selectedPerson(input) {
-  return personOnList(shownPresent(), { studentId: input?.studentId, rowNumber: input?.rowNumber });
+  const id = canonicalStudentId(student?.studentId);
+  if (!id) return { op: "missing-id" };
+  const owner = boutyOwner;
+  if (!owner || boutySigningOut) throw new Error("Bouty: sign in to record attendance.");
+  await publishAttendance();
+  if (owner !== boutyOwner || boutySigningOut) throw new Error("Bouty: sign in to record attendance.");
+  if (present.some((person) => person.studentId === id)) return { op: "already-present" };
+  await boutySync.enqueue(id, "present", at, boutyNames.get(id) || student.studentName);
+  await publishAttendance();
+  void boutySync.sync();
+  return { op: "update" };
 }
 
 async function acceptAbsent(input) {
-  const person = selectedPerson(input);
-  if (!person) return { ok: false, error: "That student is not on the sheet." };
-  const logRow = Number(input?.logRow) || 0;
-  const destination = currentConfig?.attendanceDestination || "sheet";
-  if (destination === "bouty" && boutySync) {
-    try { await boutySync.enqueue(person.studentId, "absent", new Date().toISOString(), person.name); void boutySync.sync(); }
-    catch { return { ok: false, error: "Bouty: attendance could not be queued." }; }
-  }
-  outbox = queueAbsent(outbox, { ...person, destination, at: new Date().toISOString(), logRow }, activeWrite);
-  forgetScan(person.rowNumber);
-  saveOutbox().catch((err) => console.error(err.message));
-  publishShown({ detail: `${person.name} removed from today.`, error: "" });
-  void flushOutbox();
+  if (!boutyEnabled || !boutyOwner || boutySigningOut) return { ok: false, error: "Bouty: sign in to record attendance." };
+  const person = personOnList(shownPresent(), input);
+  if (!person) return { ok: false, error: "That student is not on today's list." };
+  await boutySync.enqueue(person.studentId, "absent", new Date().toISOString(), person.name);
+  await publishAttendance();
+  void boutySync.sync();
   return { ok: true };
-}
-
-function acceptClock(input) {
-  const stamp = stampFromClock(new Date(), input?.time);
-  if (!stamp) return { ok: false, error: "Enter a time like 16:55." };
-  const person = selectedPerson(input);
-  if (!person) return { ok: false, error: "That student is not on the sheet." };
-  const clock = clockFromStamp(stamp);
-  const logRow = Number(input?.logRow) || 0;
-  outbox = queueClock(outbox, { ...person, destination: currentConfig?.attendanceDestination || "sheet", at: new Date().toISOString(), time: clock, logRow }, activeWrite);
-  rememberClock(person.rowNumber, clock);
-  saveOutbox().catch((err) => console.error(err.message));
-  publishShown({ detail: `Time for ${person.name} set to ${stamp}.`, error: "" });
-  void flushOutbox();
-  return { ok: true };
-}
-
-async function timesFor(config, people) {
-  let timed = people.map((item) => ({ ...item, time: "", logRow: 0 }));
-  if (config.logSpreadsheetId) {
-    try {
-      const log = await getSheetGrid(client, config.logSpreadsheetId, config.logSheetGid);
-      timed = attachLogTimes(people, log.rows, new Date());
-    } catch (err) {
-      console.error(err.message);
-    }
-  }
-  const day = attendanceStamp(new Date()).split(" ")[0];
-  const rows = scanTimes.day === day ? scanTimes.rows : {};
-  return withScanTimes(timed, rows, namedClocks);
-}
-
-async function publishPresent(config) {
-  if (!client || sheetDenied) {
-    publish({ present: shownPresent() });
-    return;
-  }
-  try {
-    if (config.attendanceDestination === "bouty") { await reloadStudents(config); return; }
-    const { rows } = await getSheetGrid(client, config.spreadsheetId, config.sheetGid);
-    sheetPeople = await timesFor(config, presentToday(rows, new Date()));
-  } catch (err) {
-    if (!isOfflineError(err.message)) console.error(err.message);
-  }
-  publish({ present: shownPresent() });
-}
-
-async function writeQueuedPresent(config, item) {
-  const when = new Date(item.at);
-  if (item.destination === "bouty" && (!config.logSpreadsheetId || config.logSheetGid === null)) throw new Error("Configure the Pages attendance log.");
-  if (item.destination === "bouty") item.cell = true;
-  let alreadyPresent = item.already === true;
-  if (!item.cell) {
-    const [{ title, rows }, layout] = await Promise.all([
-      getSheetGrid(client, config.spreadsheetId, config.sheetGid),
-      getDateHeader(client, config.spreadsheetId, config.sheetGid),
-    ]);
-    const plan = planAttendance(rows, item.studentId, when, true, layout);
-    if (plan.insert) await ensureDateColumn(client, config.spreadsheetId, config.sheetGid, when);
-    if (plan.op !== "update") return plan.op;
-    alreadyPresent = attendanceCellPresent(rows, plan.rowNumber, plan.columnIndex);
-    item.already = alreadyPresent;
-    await writeAttendanceCell(client, config.spreadsheetId, title, plan.a1, plan.value);
-    item.cell = true;
-    item.rowNumber = plan.rowNumber || item.rowNumber;
-    await saveOutbox();
-  }
-  if (!item.log) {
-    if (config.logSpreadsheetId) {
-      const log = await getSheetGrid(client, config.logSpreadsheetId, config.logSheetGid);
-      const header = log.rows[0] || ["الطالب", "حضور"];
-      const values = attendanceLogRow(item.studentId, when, header, item.studentName);
-      const stamp = queuedAttendanceStamp(item);
-      if (stamp) values[logLayout(header).time] = stamp;
-      const action = presentLogAction(alreadyPresent, logHits(log.rows, item.studentId, when), stamp);
-      if (action.op === "append") {
-        await appendSheetRow(client, config.logSpreadsheetId, config.logSheetGid, values);
-      } else if (action.op === "replace") {
-        await writeSheetCell(client, config.logSpreadsheetId, log.title, `${columnLetter(logLayout(header).time)}${action.rowNumber}`, stamp);
-      }
-    }
-    item.log = true;
-    await saveOutbox();
-  }
-  return "ok";
-}
-
-async function writeQueuedAbsent(config, item) {
-  const when = new Date(item.at);
-  if (item.destination === "bouty" && (!config.logSpreadsheetId || config.logSheetGid === null)) throw new Error("Configure the Pages attendance log.");
-  if (item.destination === "bouty") item.cell = true;
-  if (!item.cell) {
-    const [{ title, rows }, layout] = await Promise.all([
-      getSheetGrid(client, config.spreadsheetId, config.sheetGid),
-      getDateHeader(client, config.spreadsheetId, config.sheetGid),
-    ]);
-    const plan = planAttendance(rows, item.studentId, when, false, layout);
-    if (plan.op !== "update") return plan.op;
-    await writeAttendanceCell(client, config.spreadsheetId, title, plan.a1, "");
-    item.cell = true;
-    await saveOutbox();
-  }
-  if (!item.log && config.logSpreadsheetId) {
-    const log = await getSheetGrid(client, config.logSpreadsheetId, config.logSheetGid);
-    const hits = logHits(log.rows, item.studentId, when);
-    if (hits.length) await deleteSheetRows(client, config.logSpreadsheetId, config.logSheetGid, hits.map((hit) => hit.rowNumber));
-  }
-  item.log = true;
-  await saveOutbox();
-  return "ok";
-}
-
-async function writeQueuedClock(config, item) {
-  if (!config.logSpreadsheetId) return "ok";
-  const when = new Date(item.at);
-  const stamp = stampFromClock(when, item.time);
-  if (!stamp) return "ok";
-  const log = await getSheetGrid(client, config.logSpreadsheetId, config.logSheetGid);
-  const header = log.rows[0] || ["الطالب", "حضور"];
-  const hits = logHits(log.rows, item.studentId, when);
-  const hit = hits.find((row) => row.rowNumber === item.logRow) || hits[hits.length - 1];
-  if (hit) {
-    await writeSheetCell(client, config.logSpreadsheetId, log.title, `${columnLetter(logLayout(header).time)}${hit.rowNumber}`, stamp);
-  } else {
-    const values = attendanceLogRow(item.studentId, when, header, item.studentName);
-    values[logLayout(header).time] = stamp;
-    await appendSheetRow(client, config.logSpreadsheetId, config.logSheetGid, values);
-  }
-  return "ok";
-}
-
-async function restoreKeptPrints(config, ids) {
-  const names = await listTemplateNames(config);
-  for (const id of ids || []) {
-    const files = studentTemplateNames({ studentId: id }, names);
-    const bodies = [];
-    for (const file of files) {
-      try {
-        bodies.push(await readFile(templatePath(config.fingerprintDir, file)));
-      } catch {
-        // The local print is already gone.
-      }
-    }
-    if (bodies.length) await appendFingerprints(config, id, bodies);
-  }
-}
-
-async function writeQueuedPrints(config, item) {
-  if (!config.logSpreadsheetId || config.fingerprintSheetGid == null) return "ok";
-  const grid = await getSheetGrid(client, config.logSpreadsheetId, config.fingerprintSheetGid);
-  if (item.kind === "prints-all") {
-    await clearSheetBelowHeader(client, config.logSpreadsheetId, config.fingerprintSheetGid, grid.rows.length);
-    await restoreKeptPrints(config, item.keep);
-    return "ok";
-  }
-  const rows = fingerprintRowNumbers(grid.rows, item.studentId);
-  if (rows.length) await deleteSheetRows(client, config.logSpreadsheetId, config.fingerprintSheetGid, rows);
-  return "ok";
-}
-
-async function writeQueued(config, item) {
-  if (item.kind === "prints" || item.kind === "prints-all") return writeQueuedPrints(config, item);
-  if (item.kind === "absent") return writeQueuedAbsent(config, item);
-  if (item.kind === "time") return writeQueuedClock(config, item);
-  return writeQueuedPresent(config, item);
-}
-
-function flushOutbox() {
-  const run = flushTail.then(() => drainOutbox(), () => drainOutbox());
-  flushTail = run.then(
-    () => {},
-    () => {},
-  );
-  return run;
-}
-
-async function drainOutbox() {
-  if (!outbox.length || !client || sheetDenied || !currentConfig) return;
-  const config = currentConfig;
-  while (outbox.length && client && !sheetDenied) {
-    const item = nextGoogleAttendance(outbox, config.attendanceDestination);
-    if (!item) { publish({ syncNote: "Daily sheet changes are waiting." }); return; }
-    activeWrite = item;
-    try {
-      const result = await writeQueued(config, item);
-      if (result === "ok" && item.kind !== "prints" && item.kind !== "prints-all") {
-        sheetPeople = overlayPresent(sheetPeople, [item], todayDay());
-        rememberToday();
-      }
-      outbox = outbox.filter((entry) => entry !== item);
-      await saveOutbox();
-      publish({ present: shownPresent(), syncNote: waitingNote() });
-      if (result !== "ok") publish({ error: markDetail({ op: result, value: "حاضر" }) || "The sheet was not changed." });
-    } catch (err) {
-      const marked = item.kind === "present" && item.cell;
-      if (marked) publishShown({ detail: "Marked present. The time log was not written." });
-      if (isSheetPermissionError(err.message)) sheetDenied = true;
-      await publishSheetFailure(config, err, { keepDetail: marked });
-      return;
-    } finally {
-      activeWrite = null;
-    }
-  }
-  if (outbox.length) return;
-  publish({ syncNote: `Synced ${new Date().toLocaleTimeString()}` });
-  try {
-    await reloadStudents(config);
-  } catch (err) {
-    if (isOfflineError(err.message)) console.error(err.message);
-    else {
-      if (isSheetPermissionError(err.message)) sheetDenied = true;
-      await publishSheetFailure(config, err);
-    }
-  }
 }
 
 function markDetail(plan) {
-  if (plan.op === "update" && plan.value === "حاضر") {
-    return plan.logError ? "Marked present. The time log was not written." : "Marked present.";
-  }
-  if (plan.op === "missing-date") return "Today's date column is missing, so the sheet was not changed.";
-  if (plan.op === "duplicate") return "That id is on the sheet more than once, so no cell was changed.";
-  if (plan.op === "missing-id") return "That student has no id, so no cell was changed.";
-  if (plan.op === "missing-student") return "That student is not on the sheet. No row was added.";
-  return "";
+  if (plan.op === "update") return "Attendance queued for Bouty.";
+  if (plan.op === "already-present") return "Already here today.";
+  if (plan.op === "missing-id") return "This student has no Marif id.";
+  return plan.error || "";
 }
 
-function templateText(body) {
-  return Buffer.isBuffer(body) ? body.toString("utf8") : String(body ?? "");
-}
-
-/** Append one fingerprints-tab row per print. A failed write leaves the local file in place. */
-async function appendFingerprints(config, studentId, bodies, when = new Date()) {
-  const id = canonicalStudentId(studentId);
-  const texts = (bodies || []).map(templateText).filter((text) => text.trim());
-  if (!id || !texts.length || !config.logSpreadsheetId) return;
-  const gid = config.fingerprintSheetGid;
-  const grid = await getSheetGrid(client, config.logSpreadsheetId, gid);
-  let header = grid.rows[0] || FINGERPRINT_HEADER;
-  if (fingerprintHeaderMissing(grid.rows)) {
-    header = FINGERPRINT_HEADER;
-    await writeSheetValues(client, config.logSpreadsheetId, grid.title, "A1", [header]);
-  }
-  for (const text of texts) {
-    await appendSheetRow(client, config.logSpreadsheetId, gid, fingerprintSheetRow(id, text, header, when));
-  }
-}
-
-/** Copy sheet templates that are missing on disk. Local files the sheet does not list stay. */
-async function syncStoredPrints(config) {
-  if (!config.logSpreadsheetId) return;
-  const pending = pendingPrintDeletes(outbox);
-  if (pending.all) {
-    console.log("fingerprint sheet restore skipped");
-    return;
-  }
-  const index = await loadIndex(config.fingerprintDir);
-  const grid = await getSheetGrid(client, config.logSpreadsheetId, config.fingerprintSheetGid);
-  const existing = await listTemplateNames(config);
-  const have = new Set(existing.map((name) => name.toLowerCase()));
-  const planned = printsToRestore(fingerprintFiles(grid.rows), pending);
-  let wrote = 0;
-  for (const item of planned) {
-    if (have.has(item.file.toLowerCase())) continue;
-    await writeFile(templatePath(config.fingerprintDir, item.file), item.template);
-    have.add(item.file.toLowerCase());
-    wrote += 1;
-  }
-  const linked = new Set();
-  let changed = wrote > 0;
-  for (const item of planned) {
-    if (linked.has(item.studentId)) continue;
-    const primary = templateFileForStudent({ studentId: item.studentId });
-    if (!have.has(primary.toLowerCase())) continue;
-    linked.add(item.studentId);
-    const prev = index.students[studentKey({ studentId: item.studentId })] || {};
-    if (String(prev.templateFile || "").toLowerCase() === primary.toLowerCase()) continue;
-    changed = true;
-    putStudent(index, {
-      studentId: item.studentId,
-      studentName: prev.studentName || "",
-      templateFile: primary,
-      capturedAt: prev.capturedAt || "",
-    });
-  }
-  if (changed) await saveIndex(config.fingerprintDir, index);
-  console.log(`fingerprint sheet rows=${planned.length} wrote=${wrote}`);
-}
-
-async function safeSync(config, gen) {
-  if (!outbox.length) return;
-  sheetDenied = false;
-  if (!client) {
-    await prepareGoogle(config, gen);
-    if (!client) return;
-  }
-  publish({ syncNote: outbox.length ? "Waiting to sync" : "Syncing…" }, gen);
-  try {
-    await flushOutbox();
-    if (sheetDenied || gen !== generation) return;
-    if (!outbox.length) publish({ syncNote: `Synced ${new Date().toLocaleTimeString()}` }, gen);
-  } catch (err) {
-    if (isSheetPermissionError(err.message)) sheetDenied = true;
-    await publishSheetFailure(config, err, { gen });
-  }
-}
-
-async function showPending(config, gen, reason = "") {
-  let detail = reason || "Choose who this print belongs to.";
-  let error = "";
-  try {
-    await reloadStudents(config);
-  } catch (err) {
-    console.error(err.message);
-    const shown = sheetWindow(describeApiFailure(err.message));
-    detail = shown.syncNote || shown.error || "The student list could not be loaded.";
-    error = shown.error;
-    const index = await loadIndex(config.fingerprintDir);
-    cacheStudents(index.students);
-  }
-  if (!error && config.attendanceDestination === "bouty") {
-    detail = "Search Bouty for the student.";
-  } else if (!error && Object.keys(cached).length === 0) {
-    detail = "No students on the sheet yet. Add them in Google Sheets. This print is kept.";
-  }
-  publish({ phase: "pending", headline: "New fingerprint", detail, error, canCloseSettings: true, enroll: null }, gen);
+function showPending(gen, reason = "") {
+  cached = {};
+  boutySearch = { query: "", until: 0, promise: null };
+  publish({ phase: "pending", headline: "New fingerprint", detail: reason || "Search Bouty for the student.", error: "", canCloseSettings: true, enroll: null }, gen);
 }
 
 async function restorePending(config, gen) {
   const index = await loadIndex(config.fingerprintDir);
-  cacheStudents(index.students);
   try {
     await access(pendingPath(config.fingerprintDir));
   } catch {
@@ -1283,9 +611,7 @@ async function handleCapture(config, result, body, gen, scanImage) {
   }
   const index = await loadIndex(config.fingerprintDir);
   const decision = captureScreen(index.students, result);
-  const who = currentConfig?.attendanceDestination === "bouty"
-    ? decision.student?.studentId || ""
-    : decision.student?.studentName || decision.student?.studentId || "";
+  const who = decision.student?.studentId || "";
   pushTrace(
     {
       type: "result",
@@ -1301,9 +627,9 @@ async function handleCapture(config, result, body, gen, scanImage) {
   );
   if (decision.attendance) {
     const student = decision.student;
-    const who = currentConfig?.attendanceDestination === "bouty" ? student.studentId : student.studentName || student.studentId;
+    const who = student.studentId;
     console.log(`matched ${who || student.templateFile}`);
-    const plan = await acceptPresent(student);
+    const plan = await acceptPresent(student).catch((error) => ({ error: error.message }));
     const extra = markDetail(plan);
     const detail = [`Matched ${who}`, extra].filter(Boolean).join(" ");
     const matchedAt = new Date().toISOString();
@@ -1315,13 +641,12 @@ async function handleCapture(config, result, body, gen, scanImage) {
         lastMatch: lastMatchOf(student, matchedAt),
         scanImage,
         scanImages: [],
-        error: extra.startsWith("Marked") ? "" : extra,
+        error: plan.error || (plan.op === "missing-id" ? extra : ""),
         present: shownPresent(),
-        syncNote: waitingNote() || state.syncNote,
       },
       gen,
     );
-    if (config.attendanceDestination === "bouty") loadBoutyProfile(student, matchedAt);
+    if (boutyEnabled) loadBoutyProfile(student, matchedAt);
     return;
   }
   if (!decision.picker) {
@@ -1339,7 +664,7 @@ async function handleCapture(config, result, body, gen, scanImage) {
     { phase: "pending", headline: "New fingerprint", detail: decision.reason || "Loading students…", scanImage, scanImages: [], error: "", enroll: null },
     gen,
   );
-  await showPending(config, gen, decision.reason);
+  showPending(gen, decision.reason);
 }
 
 async function oneScan(config, gen) {
@@ -1407,72 +732,14 @@ async function oneScan(config, gen) {
   if (gen === generation && appRunning) await sleep(SCAN_RETRY_PAUSE_MS);
 }
 
-async function prepareGoogle(config, gen) {
-  sheetDenied = false;
-  sheetReported = false;
-  try {
-    client = await createGoogle(config, await credentialStore(config).read());
-  } catch (err) {
-    client = null;
-    console.error(err.message);
-    if (!publishOffline(err.message, gen)) {
-      publish(sheetWindow(describeApiFailure(err.message)), gen);
-    }
-  }
-  return config;
-}
-
 async function runLoop(config, gen) {
   await exclusive(async () => {
-    if (gen !== generation) return;
-    await restorePending(config, gen);
+    if (gen === generation) await restorePending(config, gen);
   });
-  let sheetReady = false;
-  const googleTask = (async () => {
-    try {
-      config = await prepareGoogle(config, gen);
-      currentConfig = config;
-      if (!client || sheetDenied || gen !== generation) return;
-      await exclusive(async () => {
-        if (gen !== generation) return;
-        try {
-          await syncStoredPrints(config);
-        } catch (err) {
-          console.error(err.message);
-          if (isSheetPermissionError(err.message)) console.log(await failureNote(config, err));
-        }
-        await reloadStudents(config);
-        if (!outbox.length) publish({ syncNote: `Synced ${new Date().toLocaleTimeString()}` }, gen);
-        void flushOutbox();
-      });
-    } catch (err) {
-      if (isSheetPermissionError(err.message)) sheetDenied = true;
-      await publishSheetFailure(config, err, { gen });
-    } finally {
-      sheetReady = true;
-    }
-  })();
-  void googleTask;
-  let nextSync = Date.now() + config.syncIntervalSeconds * 1000;
   while (appRunning && gen === generation) {
     try {
-      if (pause) {
-        await sleep(250);
-        continue;
-      }
-      if (outbox.length && sheetReady && Date.now() >= nextSync) {
-        nextSync = Date.now() + config.syncIntervalSeconds * 1000;
-        void safeSync(config, gen);
-        if (gen !== generation) return;
-        if (!pending && !pause && String(state.detail).startsWith("Syncing")) {
-          publish({ detail: "Listening" }, gen);
-        }
-      }
-      if (pause || pending || !scannerReady || gen !== generation) {
-        await sleep(300);
-        continue;
-      }
-      await oneScan(config, gen);
+      if (pause || pending || !scannerReady) await sleep(300);
+      else await oneScan(config, gen);
     } catch (err) {
       publish({ error: err.message }, gen);
       await sleep(2000);
@@ -1518,7 +785,6 @@ async function startLoop() {
     return;
   }
   currentConfig = config;
-  await refreshServiceAccount(config);
   await ensureRoster(config);
   publish({
     phase: "ready",
@@ -1541,7 +807,6 @@ async function startLoop() {
     scannerReady = false;
     publish({ detail: `Scanner CLI not found at ${config.zk4500Cli}` });
   }
-  if (scannerReady) publish({ detail: "Syncing templates…" });
   loopDone = runLoop(config, gen).catch((err) => {
     publish({ error: err.message }, gen);
   });
@@ -1743,28 +1008,16 @@ async function assignStudent(key) {
   pending = null;
   const cacheKey = student.rowNumber ? String(student.rowNumber) : studentKey(draft);
   cached[cacheKey] = { ...cached[cacheKey], ...draft };
-  if (config.attendanceDestination === "bouty") boutySearch = { query: "", until: 0, promise: null };
+  boutySearch = { query: "", until: 0, promise: null };
 
   const linked = {
     phase: "ready",
     headline: "Place a finger",
     lastMatch: lastMatchOf(draft, draft.capturedAt),
   };
-  let extra = "Saved on this computer.";
-  if (canonicalStudentId(draft.studentId)) {
-    outbox = forgetQueuedPrintDelete(outbox, draft.studentId);
-    saveOutbox().catch((err) => console.error(err.message));
-  }
-  if (client && canonicalStudentId(draft.studentId) && !outbox.some((item) => item.kind === "prints-all")) {
-    void appendFingerprints(config, draft.studentId, savedBodies, draft.capturedAt).catch((err) => {
-      console.error(err.message);
-      publish({ detail: `${state.detail} The fingerprint sheet was not written.`.trim() });
-    });
-  }
-  const plan = await acceptPresent(draft);
-  const note = markDetail(plan);
-  if (note) extra = note;
-  const who = config.attendanceDestination === "bouty" ? draft.studentId : draft.studentName || draft.studentId;
+  const plan = await acceptPresent(draft).catch((error) => ({ error: error.message }));
+  const extra = markDetail(plan) || "Saved on this computer.";
+  const who = draft.studentId;
   const detail = batchSave
     ? `Saved ${savedCount} scan${savedCount === 1 ? "" : "s"}. ${extra}`
     : `Linked ${who}. ${extra}`;
@@ -1777,10 +1030,9 @@ async function assignStudent(key) {
     enroll: null,
     scanImages: [],
     present: shownPresent(),
-    syncNote: waitingNote() || state.syncNote,
     ...(hadGallery ? { scanImage: scanImageUrl() } : {}),
   });
-  if (config.attendanceDestination === "bouty") loadBoutyProfile(draft, draft.capturedAt);
+  if (boutyEnabled) loadBoutyProfile(draft, draft.capturedAt);
   console.log(`linked ${who} file=${draft.templateFile} scans=${savedCount}`);
 }
 
@@ -1847,20 +1099,10 @@ async function createWindow() {
   win.webContents.send("state", state);
 }
 
-const PRINTS_KEPT = "The fingerprint sheet was not cleared. Prints on this computer were kept.";
-
 async function printRoster(config) {
   const index = await loadIndex(config.fingerprintDir);
   const names = await listTemplateNames(config);
-  let rows = [];
-  if (client && !sheetDenied && config.logSpreadsheetId) {
-    try {
-      rows = (await getSheetGrid(client, config.logSpreadsheetId, config.fingerprintSheetGid)).rows;
-    } catch (err) {
-      console.error(err.message);
-    }
-  }
-  return { students: studentsWithPrints(index.students, names, rows) };
+  return { students: studentsWithPrints(index.students, names) };
 }
 
 function publishPrintsDeleted() {
@@ -1895,62 +1137,17 @@ async function forgetLocalPrint(config, student, files) {
   }
 }
 
-/** The sheet could not be reached. The local prints go now and the sheet rows wait in the outbox. */
-async function queueStudentPrintDelete(config, student) {
-  const plan = planStudentPrintDelete(student, [], await listTemplateNames(config));
-  await forgetLocalPrint(config, student, plan.localFiles);
-  const id = canonicalStudentId(student.studentId);
-  if (id) {
-    outbox = queuePrintDelete(outbox, id);
-    saveOutbox().catch((err) => console.error(err.message));
-    void flushOutbox();
-  }
-  publishPrintsDeleted();
-}
-
-/** Sheet rows for this student go first when the sheet answers. An unreachable sheet still drops the local prints. */
 async function deleteStudentPrints(key) {
   if (!currentConfig?.fingerprintDir) throw new Error("The app is still starting.");
   const config = currentConfig;
   const student = (await printRoster(config)).students.find((item) => item.key === String(key || ""));
   if (!student) throw new Error("Choose a student from the list.");
-  const id = canonicalStudentId(student.studentId);
-  if (id && (sheetDenied || !config.logSpreadsheetId)) throw new Error("The fingerprint sheet is not available.");
-  if (id && !client) {
-    await queueStudentPrintDelete(config, student);
-    return;
-  }
-  let sheetRows = [];
-  if (id) {
-    try {
-      sheetRows = (await getSheetGrid(client, config.logSpreadsheetId, config.fingerprintSheetGid)).rows;
-    } catch (err) {
-      if (isOfflineError(err.message)) {
-        await queueStudentPrintDelete(config, student);
-        return;
-      }
-      console.error(err);
-      throw new Error(PRINTS_KEPT);
-    }
-  }
-  const plan = planStudentPrintDelete(student, sheetRows, await listTemplateNames(config));
-  if (plan.sheetRows.length) {
-    try {
-      await deleteSheetRows(client, config.logSpreadsheetId, config.fingerprintSheetGid, plan.sheetRows);
-    } catch (err) {
-      if (isOfflineError(err.message)) {
-        await queueStudentPrintDelete(config, student);
-        return;
-      }
-      console.error(err);
-      throw new Error(PRINTS_KEPT);
-    }
-  }
-  await forgetLocalPrint(config, student, localFilesAfterSheetDelete(plan, true));
+  const plan = planStudentPrintDelete(student, [], await listTemplateNames(config));
+  await forgetLocalPrint(config, student, plan.localFiles);
   publishPrintsDeleted();
 }
 
-async function finishLocalPrintWipe(config, queue) {
+async function finishLocalPrintWipe(config) {
   printsEpoch += 1;
   pending = null;
   batch = [];
@@ -1961,11 +1158,6 @@ async function finishLocalPrintWipe(config, queue) {
   for (const student of Object.values(cached)) {
     student.templateFile = "";
     student.capturedAt = "";
-  }
-  if (queue) {
-    outbox = queuePrintDeleteAll(outbox);
-    saveOutbox().catch((err) => console.error(err.message));
-    void flushOutbox();
   }
   console.log(`cleared fingerprints removed=${removed}`);
   publish({
@@ -1985,8 +1177,16 @@ function rememberScreen() {
   savedScreen = { phase: state.phase, headline: state.headline, detail: state.detail };
 }
 
+function resetBoutyView() {
+  boutyAccountVersion += 1;
+  boutyNames.clear();
+  cached = {};
+  boutySearch = { query: "", until: 0, promise: null };
+  publish({ lastMatch: null });
+}
+
 function registerIpc() {
-  ipcMain.handle("saveBouty", async (_event, input) => {
+  ipcMain.handle("saveBouty", (_event, input) => serialBouty(async () => {
     try {
       if (!boutyContext) throw new Error("Bouty is still starting.");
       const settings = JSON.parse(String(input?.settings || ""));
@@ -1998,16 +1198,14 @@ function registerIpc() {
         throw new Error("Invalid Bouty settings.");
       }
       if (input?.password) {
-        const checkSession = session.fromPartition("bouty-login-check");
-        await checkSession.clearStorageData({ storages: ["cookies"] });
-        const checkClient = createBoutyClient((url, options) => checkSession.fetch(url, options));
-        await checkClient.login(input.username, input.password);
-        await boutyCredentials.save({ username: input.username, password: input.password });
-        boutyAccountVersion += 1;
-        boutyNames.clear();
-        boutySearch = { query: "", until: 0, promise: null };
-        if (currentConfig?.attendanceDestination === "bouty") publish({ lastMatch: null, present: shownPresent() });
+        if (boutyEnabled) throw new Error("Sign out before using a different Bouty account.");
+        await boutySession.signIn(input.username, input.password);
+        try { await boutyCredentials.save({ username: input.username, password: input.password }); }
+        catch (error) { await boutySession.signOut(); throw error; }
+        boutyOwner = accountKey(input.username);
         boutyEnabled = true;
+        resetBoutyView();
+        await publishAttendance();
       } else if (!boutyEnabled) throw new Error("Enter the Bouty username and password.");
       const temporary = `${boutyContext.file}.tmp`;
       await mkdir(path.dirname(boutyContext.file), { recursive: true });
@@ -2018,11 +1216,28 @@ function registerIpc() {
       void boutySync.sync();
       return { ok: true };
     } catch (error) { return { ok: false, error: error.message }; }
+  }));
+  ipcMain.handle("signOutBouty", async () => {
+    if (boutySigningOut) return { ok: false, error: "Bouty is signing out." };
+    boutySigningOut = true;
+    try {
+      return await serialBouty(async () => {
+        await boutyCredentials.clear();
+        boutyOwner = null;
+        boutyEnabled = false;
+        resetBoutyView();
+        await publishAttendance();
+        publishBouty("");
+        await boutySession.signOut();
+        return { ok: true };
+      });
+    } catch (error) { return { ok: false, error: error.message }; }
+    finally { boutySigningOut = false; }
   });
   ipcMain.handle("getState", () => state);
   ipcMain.handle("updateAction", () => updateAction());
   ipcMain.handle("boutyRoster", async (_event, { query, page } = {}) => {
-    if (currentConfig?.attendanceDestination !== "bouty") return { error: "Select Bouty as the attendance destination." };
+    if (!currentConfig) return { error: "The app is still starting." };
     try {
       return await withBoutyLookup((api) => api.roster(String(query || "").trim().slice(0, 120), page));
     } catch (error) {
@@ -2031,7 +1246,7 @@ function registerIpc() {
   });
   ipcMain.handle("boutyStudent", async (_event, { id, studentNumber } = {}) => {
     const config = currentConfig;
-    if (config?.attendanceDestination !== "bouty") return { error: "Select Bouty as the attendance destination." };
+    if (!config) return { error: "The app is still starting." };
     try {
       const profile = await withBoutyLookup((api) => api.studentById(id, String(studentNumber || "").slice(0, 32)));
       const index = await loadIndex(config.fingerprintDir);
@@ -2043,14 +1258,14 @@ function registerIpc() {
     }
   });
   ipcMain.handle("filter", async (_event, query) => {
-    if (currentConfig?.attendanceDestination === "bouty") {
+    if (currentConfig) {
       const text = String(query || "").trim().slice(0, 120);
       if (text.length < 2) return { students: [], error: "Type at least two characters to search Bouty." };
       if (boutySearch.query !== text || boutySearch.until <= Date.now()) {
         const config = currentConfig;
         const promise = withBoutyLookup((api) => api.studentsFor(text)).then(async (profiles) => {
           const index = await loadIndex(config.fingerprintDir);
-          if (currentConfig?.attendanceDestination !== "bouty") return [];
+          if (!boutyEnabled || boutySigningOut || currentConfig !== config) return [];
           const choices = boutyStudentChoices(profiles, index.students);
           if (profiles.length && !choices.length) throw new Error("Bouty students need an unambiguous source ID.");
           const names = await listTemplateNames(config);
@@ -2074,8 +1289,7 @@ function registerIpc() {
       try { return { students: await boutySearch.promise, error: "" }; }
       catch (error) { return { students: [], error: error?.message?.startsWith("Bouty") ? error.message : "Bouty student information is unavailable." }; }
     }
-    const names = currentConfig ? await listTemplateNames(currentConfig) : [];
-    return fuzzyStudents(Object.values(cached), query).map((student) => viewStudent(student, names));
+    return { students: [], error: "The app is still starting." };
   });
   ipcMain.handle("assign", async (_event, key) => {
     try {
@@ -2132,9 +1346,7 @@ function registerIpc() {
     publish({
       phase: "config",
       headline: "Setup",
-      detail: currentConfig?.attendanceDestination === "bouty"
-        ? "Bouty account, Pages sheet, and scanner."
-        : "Google account, spreadsheet, gid, and scanner.",
+      detail: "Bouty account and scanner.",
       error: "",
       canCloseSettings: true,
     });
@@ -2167,7 +1379,7 @@ function registerIpc() {
     publish({
       phase: "prints",
       headline: "Fingerprints",
-      detail: "Remove one student's prints from this computer and the fingerprints sheet.",
+      detail: "Remove one student's fingerprints from this computer.",
       error: "",
       canCloseSettings: true,
     });
@@ -2216,57 +1428,16 @@ function registerIpc() {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle("importServiceAccount", async (event) => {
-    if (!win || event.sender !== win.webContents) return { ok: false, error: "Open Settings to import the account." };
-    try {
-      const picked = await dialog.showOpenDialog(win, { properties: ["openFile"], filters: [{ name: "Service account JSON", extensions: ["json"] }] });
-      if (picked.canceled || !picked.filePaths[0]) return { ok: false, canceled: true };
-      return await exclusive(async () => {
-        const config = loadConfig(configOptions());
-        const imported = await credentialStore(config).importFile(picked.filePaths[0]);
-        await writeConfigFile(config, { serviceAccountJson: "" });
-        currentConfig = loadConfig(configOptions());
-        await refreshServiceAccount(currentConfig);
-        await prepareGoogle(currentConfig, generation);
-        publish({ config: publicConfig(currentConfig) });
-        return { ok: true, email: imported.email };
-      });
-    } catch (error) {
-      return { ok: false, error: error.message };
-    }
-  });
   ipcMain.handle("saveConfig", async (_event, input) => {
     try {
       const prev = loadConfig(configOptions());
-      const attendanceDestination = input?.attendanceDestination === "bouty" ? "bouty" : "sheet";
-      const gidText = String(input?.sheetGid ?? "").trim();
-      const sheetGid = gidText ? Number(gidText) : prev.sheetGid;
-      if (attendanceDestination === "sheet" && (!Number.isInteger(sheetGid) || sheetGid < 0)) throw new Error("Sheet gid must be a number.");
-      const parseGid = (value, fallback) => String(value ?? "").trim() ? Number(value) : fallback;
-      const logSheetGid = parseGid(input?.logSheetGid, prev.logSheetGid);
-      const fingerprintSheetGid = parseGid(input?.fingerprintSheetGid, prev.fingerprintSheetGid);
-      const logSpreadsheetId = String(input?.logSpreadsheetId ?? prev.logSpreadsheetId ?? "").trim();
-      if (attendanceDestination === "bouty" && (!logSpreadsheetId || !Number.isInteger(logSheetGid) || logSheetGid < 0 || !Number.isInteger(fingerprintSheetGid) || fingerprintSheetGid < 0)) throw new Error("Configure the Pages attendance and fingerprint sheets.");
       await writeConfigFile(prev, {
-        attendanceDestination,
-        spreadsheetId: String(input?.spreadsheetId || "").trim(),
-        sheetGid,
-        logSpreadsheetId,
-        logSheetGid,
-        fingerprintSheetGid,
         zk4500Cli: String(input?.zk4500Cli || "").trim() || prev.zk4500Cli,
         scanTimeoutSeconds: prev.scanTimeoutSeconds,
         syncIntervalSeconds: prev.syncIntervalSeconds,
         updateChannel: input?.updateChannel === "nightly" ? "nightly" : "stable",
       });
       await saveUpdateChannelPreference(input?.updateChannel === "nightly" ? "nightly" : "stable");
-      if (attendanceDestination !== prev.attendanceDestination) {
-        boutyAccountVersion += 1;
-        boutyNames.clear();
-        boutySearch = { query: "", until: 0, promise: null };
-        sheetPeople = [];
-        publish({ lastMatch: null, present: [] });
-      }
       pause = false;
       await startLoop();
       if (app.isPackaged) {
@@ -2277,74 +1448,30 @@ function registerIpc() {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle("syncStudents", async () => {
-    try {
-      if (!currentConfig || !client) throw new Error("The sheet is not available.");
-      await exclusive(async () => {
-        publish({ syncNote: "Loading students…", error: "" });
-        await reloadStudents(currentConfig);
-        publish({ syncNote: `Synced ${new Date().toLocaleTimeString()}` });
-      });
-      return { ok: true };
-    } catch (err) {
-      if (publishOffline(err?.message)) return { ok: false };
-      const message = err?.message || "The sheet is not available.";
-      console.error(message);
-      const shown = sheetWindow(describeApiFailure(message));
-      publish(shown);
-      return { ok: false, error: shown.error };
-    }
-  });
   ipcMain.handle("markPresent", async (_event, student) => {
     const at = new Date().toISOString();
     try {
-      const result = await acceptPresent(student, at);
+      const result = await exclusive(() => acceptPresent(student, at));
       if (result?.op === "missing-id") return { ok: false, error: "This student has no Marif id." };
       const match = lastMatchOf(student, at);
       publish({ lastMatch: { ...match, studentName: student.studentName || match.studentName,
         fields: student.fields || match.fields, profileStatus: "" } });
       return { ok: true };
     } catch (err) {
-      const message = err?.message || "The sheet could not be updated.";
-      if (message.startsWith("Bouty:")) return { ok: false, error: message };
-      console.error(message);
-      const shown = sheetWindow(describeApiFailure(message));
-      publish(shown);
-      return { ok: false, error: shown.error };
+      return { ok: false, error: err.message };
     }
   });
   ipcMain.handle("undoAttendance", async (_event, input) => {
-    if (!currentConfig) return { ok: false, error: "The sheet is not available." };
-    return acceptAbsent(input);
-  });
-  ipcMain.handle("setAttendanceTime", async (_event, input) => {
-    if (!currentConfig) return { ok: false, error: "The sheet is not available." };
-    if (!currentConfig.logSpreadsheetId) return { ok: false, error: "No time log sheet is configured." };
-    return acceptClock(input);
+    try { return await exclusive(() => acceptAbsent(input)); }
+    catch (error) { return { ok: false, error: error.message }; }
   });
   ipcMain.handle("clearFingerprints", async () => {
     if (!currentConfig?.fingerprintDir) return { ok: false, error: "The app is still starting." };
-    if (sheetDenied) return { ok: false, error: "The fingerprint sheet is not available." };
-    const config = currentConfig;
     try {
-      await exclusive(async () => {
-        const unreachable = !client || !config.logSpreadsheetId;
-        if (!unreachable) {
-          try {
-            const grid = await getSheetGrid(client, config.logSpreadsheetId, config.fingerprintSheetGid);
-            await clearSheetBelowHeader(client, config.logSpreadsheetId, config.fingerprintSheetGid, grid.rows.length);
-          } catch (err) {
-            if (!isOfflineError(err.message)) throw err;
-            await finishLocalPrintWipe(config, true);
-            return;
-          }
-        }
-        await finishLocalPrintWipe(config, unreachable);
-      });
+      await exclusive(() => finishLocalPrintWipe(currentConfig));
       return { ok: true };
-    } catch (err) {
-      console.error(err);
-      return { ok: false, error: err.message };
+    } catch (error) {
+      return { ok: false, error: error.message };
     }
   });
   ipcMain.handle("pickFile", async (_event, kind) => {
@@ -2382,14 +1509,17 @@ if (!app.requestSingleInstanceLock()) {
       updateState.version = app.getVersion();
       state.appVersion = app.getVersion();
       setupAutoUpdater();
-      await loadScanTimes();
       boutyContext = await setupBouty();
+      publishBouty();
       await createWindow();
       await startLoop();
+      await publishAttendance();
       if (app.isPackaged) setTimeout(() => checkForUpdates(), 5000);
-      publishBouty();
       void boutySync.sync();
-      setInterval(() => { if (boutySync) void boutySync.sync(); }, 60000).unref();
+      setInterval(() => {
+        void boutySync.sync();
+        void publishAttendance().catch((error) => publishBouty(error.message));
+      }, (currentConfig?.syncIntervalSeconds || 60) * 1000).unref();
     } catch (err) {
       console.error(err);
       publish({
@@ -2408,6 +1538,6 @@ if (!app.requestSingleInstanceLock()) {
     quitRequested = true;
     appRunning = false;
     generation += 1;
-    Promise.allSettled([identifyPromise, loopDone, outboxSaveTail]).then(() => app.quit());
+    Promise.allSettled([identifyPromise, loopDone, boutyLookupTail]).then(() => app.quit());
   });
 }
