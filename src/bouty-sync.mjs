@@ -9,6 +9,13 @@ function damascusDate(timestamp) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Damascus", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
 }
 
+export async function enqueueBoutyAttendance(queue, owner, studentId, kind, at = new Date().toISOString(), name = "") {
+  const id = canonicalPrintStudentId(studentId);
+  if (!id || !["present", "absent"].includes(kind)) throw new Error("Invalid Bouty attendance.");
+  damascusDate(at);
+  await queue.enqueue({ id: randomUUID(), studentId: id, studentName: String(name || "").trim(), kind, at, owner });
+}
+
 /** The caller supplies the current day's ID and explicit roster-to-enrolment mapping. */
 export function createBoutySync({ queue, credentials, client, settings, studentName = async () => "", onStatus = () => {},
   withSession = (run) => run(client), accountKey = () => undefined, sourceLinks = () => new Map() }) {
@@ -73,12 +80,7 @@ export function createBoutySync({ queue, credentials, client, settings, studentN
     return running;
   }
   return {
-    async enqueue(studentId, kind, at = new Date().toISOString(), name = "") {
-      const id = canonicalPrintStudentId(studentId);
-      if (!id || !["present", "absent"].includes(kind)) throw new Error("Invalid Bouty attendance.");
-      damascusDate(at);
-      await queue.enqueue({ id: randomUUID(), studentId: id, studentName: String(name || "").trim(), kind, at, owner: accountKey() });
-    },
+    enqueue: (studentId, kind, at, name) => enqueueBoutyAttendance(queue, accountKey(), studentId, kind, at, name),
     sync,
   };
 }

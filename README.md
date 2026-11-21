@@ -30,6 +30,8 @@ After the first successful roster download, the app keeps an encrypted copy for 
 
 Today and the dashboard reflect attendance recorded by this installation. The arrival clock shows the local scan time. Manage corrections and view attendance from other devices on Bouty.
 
+To practice, sign in and turn on **Test mode** in **Settings**. Scan a finger, link it to a roster student, or mark and undo attendance manually. Today, Dashboard, and Fingerprints show your practice changes. Bouty and the Google Sheets backup receive no practice writes. Turning the switch off or closing the app discards the session and restores the live view.
+
 The advanced settings allow explicit IDs when automatic lookup is unavailable:
 
 ```json

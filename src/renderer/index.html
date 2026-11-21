@@ -41,6 +41,7 @@
           </button>
         </div>
       </header>
+      <div id="test-mode-indicator" role="status" data-i18n="Test mode · Attendance stays on this device" hidden>Test mode · Attendance stays on this device</div>
       <section id="ready" class="hero">
         <div class="cue">
         <h1 id="headline" data-i18n="Place a finger">Place a finger</h1>
@@ -151,7 +152,15 @@
           <p class="detail" id="config-detail">Bouty account and scanner.</p>
           <p class="app-version"><span data-i18n="Version">Version</span> <strong id="app-version" dir="ltr">-</strong></p>
         </div>
-        <div class="settings-form-grid">
+        <div class="settings-page">
+        <div class="test-mode-setting">
+          <label for="test-mode" class="test-mode-label">
+            <span data-i18n="Test mode">Test mode</span>
+            <input type="checkbox" role="switch" id="test-mode" aria-describedby="test-mode-help" disabled />
+          </label>
+          <p id="test-mode-help" class="detail" data-i18n="Test attendance appears only on this device, in Today and Dashboard. Turning test mode off or closing the app discards practice marks and fingerprint changes.">Test attendance appears only on this device, in Today and Dashboard. Turning test mode off or closing the app discards practice marks and fingerprint changes.</p>
+        </div>
+        <fieldset id="persistent-settings" class="settings-form-grid" data-i18n-aria="Settings" aria-label="Settings">
         <div id="bouty-fields" class="field field-wide">
           <div id="bouty-sign-in" class="field">
           <label class="field"><span data-i18n="Bouty username">Bouty username</span><input id="bouty-user" type="text" autocomplete="username" dir="ltr" /></label>
@@ -220,6 +229,7 @@
         </label>
         <p class="detail field-wide"><span data-i18n="Prints are stored in">Prints are stored in</span> <span id="cfg-dir" dir="ltr"></span></p>
           <p class="detail" data-i18n="Fingerprints are not sent to Bouty.">Fingerprints are not sent to Bouty.</p>
+        </fieldset>
         <div class="settings-inline-actions field-wide">
           <button id="clear-prints" class="danger" type="button" data-i18n="Delete all fingerprints">Delete all fingerprints</button>
         </div>
@@ -234,6 +244,9 @@
         <span id="sync"></span>
       </footer>
     </div>
+    <dialog id="test-mode-progress" aria-labelledby="test-mode-progress-label">
+      <p id="test-mode-progress-label" data-i18n="Changing test mode. Wait for the scanner to finish.">Changing test mode. Wait for the scanner to finish.</p>
+    </dialog>
     <div id="update-dialog" class="update-dialog" role="dialog" aria-modal="false" aria-labelledby="update-dialog-title" hidden>
       <div class="update-dialog-card">
         <div class="update-dialog-head">

@@ -6,7 +6,8 @@ import { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, safeStorage, 
 import electronUpdater from "electron-updater";
 import { createBoutyClient } from "../bouty.mjs";
 import { createBoutyCredentials, createBoutyQueue, createBoutyRosterCache, parseBoutyMapping } from "../bouty-storage.mjs";
-import { createBoutySync } from "../bouty-sync.mjs";
+import { createTestWorkspace, discardTestWorkspace } from "../test-mode.mjs";
+import { createBoutySync, enqueueBoutyAttendance } from "../bouty-sync.mjs";
 import { applyBoutyProfile, boutySourceLinks, boutyStudentChoices, migrateBoutyPrintLinks, normalizeBoutySourceId } from "../bouty-resolve.mjs";
 import { legacyUserDataPath, loadConfig, scannerExeInResources, updateChannelPreferencePath } from "../config.mjs";
 import { createCredentialStore, credentialFile } from "../credentials.mjs";
@@ -25,7 +26,11 @@ import {
 
 const mainDir = path.dirname(fileURLToPath(import.meta.url));
 const { autoUpdater } = electronUpdater;
-startAppLog();
+let testSession = null;
+let switchingMode = false;
+let modeRequest = null;
+const activeRequests = new Set();
+startAppLog(undefined, () => !testSession);
 
 const UPDATE_CHECK_ERROR = "Update check failed.";
 const UPDATE_DOWNLOAD_ERROR = "Update download failed.";
@@ -130,7 +135,7 @@ function refreshRoster() {
     return serialBouty(async () => {
       if (version !== boutyAccountVersion || boutySigningOut) throw new Error("Bouty account changed.");
       const snapshot = [...students.values()];
-      await rosterCache.save(owner, snapshot);
+      if (!testSession) await rosterCache.save(owner, snapshot);
       await exclusive(async () => {
         if (version !== boutyAccountVersion || boutySigningOut) throw new Error("Bouty account changed.");
         if (currentConfig) await ensureRoster(currentConfig, snapshot);
@@ -241,7 +246,7 @@ async function setupBouty() {
     queue: boutyQueue,
     credentials: boutyCredentials,
     withSession: (run) => serialBouty(async () => {
-      if (!boutySigningOut && boutyEnabled) await boutySession.run(run);
+      if (!testSession && !switchingMode && !boutySigningOut && boutyEnabled) await boutySession.run(run);
     }),
     accountKey: () => boutyOwner,
     sourceLinks: () => boutySourceLinks(roster),
@@ -257,6 +262,7 @@ async function setupBouty() {
 
 let state = {
   appVersion: app.getVersion(),
+  testMode: false,
   phase: "ready",
   headline: "Place a finger",
   detail: "Listening",
@@ -467,8 +473,9 @@ function shownPresent() {
 
 async function publishAttendance() {
   const owner = boutyOwner;
-  const records = owner ? await boutyQueue.attendance() : [];
-  if (owner !== boutyOwner) return;
+  const queue = testSession?.queue || boutyQueue;
+  const records = owner ? await queue.attendance() : [];
+  if (queue !== (testSession?.queue || boutyQueue) || owner !== boutyOwner) return;
   const days = new Map();
   const links = boutySourceLinks(roster);
   for (const record of records) {
@@ -489,6 +496,16 @@ async function publishAttendance() {
   publish({ present: shownPresent(), dashboard });
 }
 
+async function recordAttendance(id, kind, at, name) {
+  if (testSession) {
+    await enqueueBoutyAttendance(testSession.queue, boutyOwner, id, kind, at, name);
+  } else {
+    await boutySync.enqueue(id, kind, at, name);
+    void boutySync.sync();
+  }
+  await publishAttendance();
+}
+
 async function acceptPresent(student, at = new Date().toISOString()) {
   const originalId = canonicalPrintStudentId(student?.studentId);
   const id = boutySourceLinks(roster).get(normalizeBoutySourceId(originalId)) || originalId;
@@ -498,9 +515,7 @@ async function acceptPresent(student, at = new Date().toISOString()) {
   await publishAttendance();
   if (owner !== boutyOwner || boutySigningOut) throw new Error("Bouty: sign in to record attendance.");
   if (present.some((person) => person.studentId === id)) return { op: "already-present" };
-  await boutySync.enqueue(id, "present", at, boutyNames.get(id) || student.studentName);
-  await publishAttendance();
-  void boutySync.sync();
+  await recordAttendance(id, "present", at, boutyNames.get(id) || student.studentName);
   return { op: "update" };
 }
 
@@ -508,14 +523,12 @@ async function acceptAbsent(input) {
   if (!boutyEnabled || !boutyOwner || boutySigningOut) return { ok: false, error: "Bouty: sign in to record attendance." };
   const person = personOnList(shownPresent(), input);
   if (!person) return { ok: false, error: "That student is not on today's list." };
-  await boutySync.enqueue(person.studentId, "absent", new Date().toISOString(), person.name);
-  await publishAttendance();
-  void boutySync.sync();
+  await recordAttendance(person.studentId, "absent", new Date().toISOString(), person.name);
   return { ok: true };
 }
 
 function markDetail(plan) {
-  if (plan.op === "update") return "Attendance queued for Bouty.";
+  if (plan.op === "update") return testSession ? "Attendance recorded in test mode." : "Attendance queued for Bouty.";
   if (plan.op === "already-present") return "Already here today.";
   if (plan.op === "missing-id") return "This student has no Marif id.";
   return plan.error || "";
@@ -582,7 +595,7 @@ async function keepScanImage(source) {
     allowedImage = "";
     return "";
   }
-  const dest = path.join(app.getPath("userData"), "last-scan.jpg");
+  const dest = path.join(testSession?.root || app.getPath("userData"), "last-scan.jpg");
   await mkdir(path.dirname(dest), { recursive: true });
   await copyFile(source, dest);
   allowedImage = dest;
@@ -591,7 +604,7 @@ async function keepScanImage(source) {
 
 async function rememberBatchImage(source) {
   if (!source) return;
-  const dir = path.join(app.getPath("userData"), "batch-scans");
+  const dir = path.join(testSession?.root || app.getPath("userData"), "batch-scans");
   await mkdir(dir, { recursive: true });
   const dest = path.join(dir, `${batchImages.length}.jpg`);
   await copyFile(source, dest);
@@ -730,7 +743,7 @@ async function oneScan(config, gen) {
   const started = beginScanAttempt({ streak: scanFailStreak });
   scanFailStreak = started.streak;
   if (state.error === SCAN_OUTAGE_MESSAGE) publish({ error: "" }, gen);
-  const outDir = await mkdtemp(path.join(tmpdir(), "attendance-scan-"));
+  const outDir = await mkdtemp(path.join(testSession?.root || tmpdir(), "attendance-scan-"));
   const startedAt = Date.now();
   let result = { ok: false, error: "Scanner did not run.", timedOut: false };
   let body = null;
@@ -763,7 +776,7 @@ async function oneScan(config, gen) {
     }
     result = mergeCapturedFiles(result, names.map((name) => path.join(outDir, name)));
     if (result.ok && result.templatePath) body = await readFile(result.templatePath);
-    if (result.ok && result.imagePath) {
+    if (!switchingMode && gen === generation && result.ok && result.imagePath) {
       try {
         scanImage = await keepScanImage(result.imagePath);
       } catch (err) {
@@ -782,7 +795,7 @@ async function oneScan(config, gen) {
   if (result.killed) pushTrace({ type: "killed", elapsedSeconds }, gen);
   else if (!result.ok) pushTrace({ type: "exited", exitCode: result.exitCode, timedOut: Boolean(result.timedOut), elapsedSeconds }, gen);
   await exclusive(async () => {
-    if (gen !== generation || epoch !== printsEpoch) return;
+    if (switchingMode || gen !== generation || epoch !== printsEpoch) return;
     if (pending && !collecting) return;
     await handleCapture(config, result, body, gen, scanImage);
   });
@@ -790,13 +803,13 @@ async function oneScan(config, gen) {
   if (gen === generation && appRunning) await sleep(SCAN_RETRY_PAUSE_MS);
 }
 
-async function runLoop(config, gen) {
-  await exclusive(async () => {
+async function runLoop(config, gen, restore = true) {
+  if (restore) await exclusive(async () => {
     if (gen === generation) await restorePending(config, gen);
   });
   while (appRunning && gen === generation) {
     try {
-      if (pause || pending || !scannerReady) await sleep(300);
+      if (switchingMode || pause || pending || !scannerReady) await sleep(300);
       else await oneScan(config, gen);
     } catch (err) {
       publish({ error: err.message }, gen);
@@ -818,13 +831,14 @@ async function ensureRoster(config, profiles = roster) {
 }
 
 function requestPrintBackup() {
+  if (testSession) return;
   printBackupPending = true;
   void syncPrintBackup();
 }
 
 async function syncPrintBackup() {
   const config = currentConfig;
-  if (!printBackupPending || printBackupRunning || !net.isOnline() ||
+  if (testSession || switchingMode || !printBackupPending || printBackupRunning || !net.isOnline() ||
       !config?.logSpreadsheetId || config.fingerprintSheetGid == null) return;
   printBackupRunning = true;
   printBackupPending = false;
@@ -845,6 +859,7 @@ async function syncPrintBackup() {
     printBackupError = true;
   } finally {
     printBackupRunning = false;
+    if (config !== currentConfig) printBackupPending = true;
     if (printBackupPending && !printBackupError) void syncPrintBackup();
   }
 }
@@ -880,7 +895,13 @@ async function startLoop() {
   currentConfig = config;
   await exclusive(() => ensureRoster(config));
   requestPrintBackup();
+  await resumeScanner(config, gen, { restorePendingScan: true, ...(dropGallery ? { scanImage: "" } : {}) });
+}
+
+async function resumeScanner(config, gen, { restorePendingScan = false, ...view } = {}) {
   publish({
+    ...view,
+    testMode: Boolean(testSession),
     phase: "ready",
     headline: "Place a finger",
     detail: "Listening",
@@ -891,7 +912,6 @@ async function startLoop() {
     error: "",
     enroll: null,
     scanImages: [],
-    ...(dropGallery ? { scanImage: "" } : {}),
   });
   console.log("scanner screen");
   scannerReady = true;
@@ -901,7 +921,7 @@ async function startLoop() {
     scannerReady = false;
     publish({ detail: `Scanner CLI not found at ${config.zk4500Cli}` });
   }
-  loopDone = runLoop(config, gen).catch((err) => {
+  loopDone = runLoop(config, gen, restorePendingScan).catch((err) => {
     publish({ error: err.message }, gen);
   });
 }
@@ -1278,8 +1298,88 @@ function resetBoutyView() {
   publish({ lastMatch: null });
 }
 
+const modeBusy = "Changing test mode. Wait for the scanner to finish.";
+
+async function changeTestMode(enabled) {
+  if (typeof enabled !== "boolean" || switchingMode) return { ok: false, error: modeBusy };
+  if (enabled === Boolean(testSession)) return { ok: true };
+  if (!currentConfig || !boutyContext || state.phase !== "config") return { ok: false, error: "Open Settings to change test mode." };
+  switchingMode = true;
+  try {
+    await Promise.allSettled([...activeRequests]);
+    if (enabled && !boutyOwner) return { ok: false, error: "Sign in to Bouty before starting test mode." };
+    if (state.phase !== "config") return { ok: false, error: "Open Settings to change test mode." };
+    generation += 1;
+    await loopDone;
+    await rosterRefresh?.promise.catch(() => {});
+    await boutyLookupTail;
+    await lock;
+    if (enabled && (pending || collecting)) throw new Error("Finish or discard the current enrollment before starting test mode.");
+    const userDataDir = app.getPath("userData");
+    const live = testSession?.live;
+    if (enabled) {
+      await discardTestWorkspace(userDataDir);
+      const attendance = (await boutyQueue.attendance()).filter((record) => record.owner === boutyOwner);
+      const workspace = await createTestWorkspace({ userDataDir, fingerprintDir: currentConfig.fingerprintDir, attendance });
+      testSession = {
+        root: workspace.root,
+        queue: createBoutyQueue(workspace.queueFile),
+        live: { config: currentConfig, roster, match: state.lastMatch, image: allowedImage, trace: state.trace, names: new Map(boutyNames) },
+      };
+      currentConfig = { ...currentConfig, fingerprintDir: workspace.fingerprintDir, fingerprintSheetGid: null };
+    } else {
+      await discardTestWorkspace(userDataDir);
+      currentConfig = live.config;
+      roster = live.roster;
+      testSession = null;
+    }
+    boutyAccountVersion += 1;
+    boutyNames.clear();
+    if (live) for (const [id, name] of live.names) boutyNames.set(id, name);
+    savedScreen = null;
+    cached = {};
+    pending = null;
+    batch = [];
+    collecting = false;
+    clearBatchImages();
+    allowedImage = live?.image || "";
+    scanFailStreak = 0;
+    pause = false;
+    await resumeScanner(currentConfig, generation, { lastMatch: live?.match || null, trace: live?.trace || [], scanImage: scanImageUrl() });
+    await publishAttendance().catch((error) => publish({ error: error.message }));
+    return { ok: true };
+  } catch (error) {
+    // Keep the current workspace active and paused in Settings so the user can retry.
+    pause = true;
+    if (appRunning) loopDone = runLoop(currentConfig, ++generation, false).catch((err) => publish({ error: err.message }));
+    return { ok: false, error: error.message };
+  } finally {
+    switchingMode = false;
+    if (!enabled && !testSession && !quitRequested) {
+      void boutySync.sync();
+      void syncPrintBackup();
+    }
+  }
+}
+
 function registerIpc() {
-  ipcMain.handle("saveBouty", (_event, input) => serialBouty(async () => {
+  ipcMain.handle("setTestMode", (_event, enabled) => {
+    if (switchingMode || quitRequested) return { ok: false, error: modeBusy };
+    modeRequest = changeTestMode(enabled);
+    return modeRequest;
+  });
+  ipcMain.handle("getState", () => state);
+  const liveSettings = new Set(["saveConfig", "saveBouty", "signOutBouty", "updateAction"]);
+  function handle(channel, handler) {
+    ipcMain.handle(channel, (...args) => {
+      if (switchingMode || quitRequested) return { ok: false, error: modeBusy };
+      if (testSession && liveSettings.has(channel)) return { ok: false, error: "Exit test mode to change these settings." };
+      const request = Promise.resolve().then(() => handler(...args));
+      activeRequests.add(request);
+      return request.finally(() => activeRequests.delete(request));
+    });
+  }
+  handle("saveBouty", (_event, input) => serialBouty(async () => {
     try {
       if (!boutyContext) throw new Error("Bouty is still starting.");
       const settings = JSON.parse(String(input?.settings || ""));
@@ -1312,7 +1412,7 @@ function registerIpc() {
       return { ok: true };
     } catch (error) { return { ok: false, error: error.message }; }
   }));
-  ipcMain.handle("signOutBouty", async () => {
+  handle("signOutBouty", async () => {
     if (boutySigningOut) return { ok: false, error: "Bouty is signing out." };
     boutySigningOut = true;
     try {
@@ -1331,9 +1431,8 @@ function registerIpc() {
     } catch (error) { return { ok: false, error: error.message }; }
     finally { boutySigningOut = false; }
   });
-  ipcMain.handle("getState", () => state);
-  ipcMain.handle("updateAction", () => updateAction());
-  ipcMain.handle("boutyRoster", async (_event, { query, page = 1, refresh } = {}) => {
+  handle("updateAction", () => updateAction());
+  handle("boutyRoster", async (_event, { query, page = 1, refresh } = {}) => {
     if (!boutyOwner || boutySigningOut) return { error: "Bouty: sign in to look up students." };
     let notice = "";
     const version = boutyAccountVersion;
@@ -1351,7 +1450,7 @@ function registerIpc() {
     const number = Number.isSafeInteger(page) && page > 0 ? page : 1;
     return { students: filtered.slice((number - 1) * 15, number * 15), hasNext: filtered.length > number * 15, notice };
   });
-  ipcMain.handle("boutyStudent", async (_event, { id, studentNumber } = {}) => {
+  handle("boutyStudent", async (_event, { id, studentNumber } = {}) => {
     const config = currentConfig;
     const version = boutyAccountVersion;
     if (!config || !boutyOwner || boutySigningOut) return { error: "Bouty: sign in to look up students." };
@@ -1371,7 +1470,7 @@ function registerIpc() {
       return { error: error?.message?.startsWith("Bouty") ? error.message : "Bouty student information is unavailable." };
     }
   });
-  ipcMain.handle("filter", async (_event, query) => {
+  handle("filter", async (_event, query) => {
     const config = currentConfig;
     const version = boutyAccountVersion;
     if (!config || !boutyOwner || boutySigningOut) return { students: [], error: "Bouty: sign in to look up students." };
@@ -1398,7 +1497,7 @@ function registerIpc() {
       return { students: [], error: "Connect to Bouty to save the student list for offline use." };
     }
   });
-  ipcMain.handle("assign", async (_event, key) => {
+  handle("assign", async (_event, key) => {
     try {
       await exclusive(() => assignStudent(key));
       return { ok: true };
@@ -1411,7 +1510,7 @@ function registerIpc() {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle("rescan", async () => {
+  handle("rescan", async () => {
     try {
       await exclusive(() => rescanCapture());
       return { ok: true };
@@ -1420,7 +1519,7 @@ function registerIpc() {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle("discardScans", async () => {
+  handle("discardScans", async () => {
     try {
       await exclusive(() => discardScans());
       return { ok: true };
@@ -1429,7 +1528,7 @@ function registerIpc() {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle("addMoreScans", async () => {
+  handle("addMoreScans", async () => {
     try {
       await exclusive(() => addMoreScans());
       return { ok: true };
@@ -1442,11 +1541,11 @@ function registerIpc() {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle("finishEnroll", async () => {
+  handle("finishEnroll", async () => {
     await exclusive(() => finishEnroll());
     return { ok: true };
   });
-  ipcMain.handle("openSettings", () => {
+  handle("openSettings", () => {
     if (state.phase === "linking") return;
     rememberScreen();
     pause = true;
@@ -1458,7 +1557,7 @@ function registerIpc() {
       canCloseSettings: true,
     });
   });
-  ipcMain.handle("closeSettings", () => {
+  handle("closeSettings", () => {
     if (!currentConfig) return;
     pause = false;
     if (pending) {
@@ -1479,7 +1578,7 @@ function registerIpc() {
       error: "",
     });
   });
-  ipcMain.handle("openPrints", () => {
+  handle("openPrints", () => {
     if (state.phase === "linking") return;
     rememberScreen();
     pause = true;
@@ -1491,7 +1590,7 @@ function registerIpc() {
       canCloseSettings: true,
     });
   });
-  ipcMain.handle("closePrints", () => {
+  handle("closePrints", () => {
     if (!currentConfig) return;
     pause = false;
     if (pending) {
@@ -1512,7 +1611,7 @@ function registerIpc() {
       error: "",
     });
   });
-  ipcMain.handle("listPrints", async (_event, query) => {
+  handle("listPrints", async (_event, query) => {
     if (!currentConfig?.fingerprintDir) return [];
     try {
       const roster = await printRoster(currentConfig);
@@ -1527,7 +1626,7 @@ function registerIpc() {
       return [];
     }
   });
-  ipcMain.handle("deleteStudentPrints", async (_event, key) => {
+  handle("deleteStudentPrints", async (_event, key) => {
     try {
       await exclusive(() => deleteStudentPrints(key));
       return { ok: true };
@@ -1535,7 +1634,7 @@ function registerIpc() {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle("saveConfig", async (_event, input) => {
+  handle("saveConfig", async (_event, input) => {
     try {
       const prev = loadConfig(configOptions());
       await writeConfigFile(prev, {
@@ -1555,7 +1654,7 @@ function registerIpc() {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle("markPresent", async (_event, student) => {
+  handle("markPresent", async (_event, student) => {
     const at = new Date().toISOString();
     try {
       const result = await exclusive(() => acceptPresent(student, at));
@@ -1568,11 +1667,11 @@ function registerIpc() {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle("undoAttendance", async (_event, input) => {
+  handle("undoAttendance", async (_event, input) => {
     try { return await exclusive(() => acceptAbsent(input)); }
     catch (error) { return { ok: false, error: error.message }; }
   });
-  ipcMain.handle("clearFingerprints", async () => {
+  handle("clearFingerprints", async () => {
     if (!currentConfig?.fingerprintDir) return { ok: false, error: "The app is still starting." };
     try {
       await exclusive(() => finishLocalPrintWipe(currentConfig));
@@ -1581,7 +1680,7 @@ function registerIpc() {
       return { ok: false, error: error.message };
     }
   });
-  ipcMain.handle("pickFile", async (_event, kind) => {
+  handle("pickFile", async (_event, kind) => {
     const filters =
       kind === "exe"
         ? [{ name: "Executable", extensions: ["exe"] }]
@@ -1612,6 +1711,9 @@ if (!app.requestSingleInstanceLock()) {
       });
       app.setAppUserModelId("com.masjid.attendance");
       Menu.setApplicationMenu(null);
+      await discardTestWorkspace(app.getPath("userData")).catch((error) => {
+        console.error("Could not clean up the previous test session.", error.message);
+      });
       registerIpc();
       updateState.version = app.getVersion();
       state.appVersion = app.getVersion();
@@ -1625,7 +1727,8 @@ if (!app.requestSingleInstanceLock()) {
       if (app.isPackaged) setTimeout(() => checkForUpdates(), 5000);
       void boutySync.sync();
       setInterval(() => {
-        void boutySync.sync();
+        if (switchingMode || quitRequested) return;
+        if (!testSession) void boutySync.sync();
         void syncPrintBackup();
         if (boutyOwner && !roster && net.isOnline()) void refreshRoster().catch(() => {});
         void publishAttendance().catch((error) => publishBouty(error.message));
@@ -1648,6 +1751,8 @@ if (!app.requestSingleInstanceLock()) {
     quitRequested = true;
     appRunning = false;
     generation += 1;
-    Promise.allSettled([identifyPromise, loopDone, boutyLookupTail]).then(() => app.quit());
+    Promise.allSettled([identifyPromise, loopDone, boutyLookupTail, rosterRefresh?.promise, ...activeRequests, modeRequest]).then(async () => {
+      if (testSession) await discardTestWorkspace(app.getPath("userData"));
+    }).catch((error) => console.error(error.message)).finally(() => app.quit());
   });
 }
