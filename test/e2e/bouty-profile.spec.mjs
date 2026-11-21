@@ -139,7 +139,7 @@ test("saved Bouty students support offline enrollment and manual attendance afte
   await students.click();
   await expect(app.page.locator("#last-name")).toHaveText("Website Student");
   await expect(app.page.locator("#today-list")).toContainText("Website Student");
-  expect(await app.files()).toContain("s-00-00-000-005.txt");
+  expect(await app.files()).toContain("s-bouty-9.txt");
 });
 
 test("Bouty picker and scan card use website student information", async ({ app }) => {

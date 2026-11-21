@@ -37,7 +37,7 @@ export const test = base.extend({
       sheetGid: 1,
       logSpreadsheetId: "pages-test",
       logSheetGid: 2,
-      fingerprintSheetGid: 3,
+      fingerprintSheetGid: null,
       zk4500Cli: scannerExe,
       scanTimeoutSeconds: 20,
       syncIntervalSeconds: 1,

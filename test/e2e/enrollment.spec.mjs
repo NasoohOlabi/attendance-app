@@ -129,13 +129,43 @@ test("cancel confirmation drops pending scans and keeps prints already enrolled"
 });
 
 test("deleting one student's fingerprints preserves the other student's local files", async ({ app }) => {
+  await app.ready();
+  await app.page.evaluate(() => window.attendance.boutyRoster({ page: 1 }));
   await app.seedPrint(id1, "Website Student");
   await app.seedPrint(id2, "Second Student");
+  await app.restart();
+  await app.ready();
   await app.page.locator("#prints-nav").click();
   const row = app.page.locator("#prints-list li").filter({ hasText: "Second Student" });
   await row.getByRole("button").click();
   await app.page.locator("#confirm-ok").click();
   await expect.poll(app.files).toEqual(["s-00-00-000-005.txt"]);
-  expect((await app.index()).students[id2]).toMatchObject({ templateFile: "", capturedAt: "" });
+  await expect.poll(async () => (await app.index()).students["bouty:10"]).toMatchObject({ templateFile: "", capturedAt: "" });
   expect(app.sheets.requests).toEqual([]);
+});
+
+test.describe("configured Sheets backup", () => {
+  test.use({ fixtureOptions: { config: { fingerprintSheetGid: 3 } } });
+
+  test("fingerprints back up after a Sheets outage without duplicating on restart", async ({ app }) => {
+    app.sheets.offline = true;
+    await app.seedPrint(id1, "Website Student");
+    await app.restart();
+    await app.ready();
+    await captureUnknown(app, "backup-sample");
+    await chooseStudent(app);
+    await expect.poll(() => app.sheets.requests.length).toBeGreaterThan(0);
+
+    const backedUp = () => app.sheets.grid("FingerPrints").rows.slice(1).map((row) => row.slice(0, 2)).sort();
+    expect(backedUp()).toEqual([]);
+    expect(await app.files()).toHaveLength(2);
+    app.sheets.offline = false;
+    await expect.poll(backedUp).toEqual([[studentId, "backup-sample"], [studentId, "synthetic-print"]]);
+
+    const before = app.sheets.requests.length;
+    await app.restart();
+    await expect.poll(() => app.sheets.requests.slice(before).some((request) => request.url.includes("/values/"))).toBe(true);
+    expect(backedUp()).toHaveLength(2);
+    expect(app.sheets.requests.filter((request) => request.method === "POST")).toHaveLength(1);
+  });
 });

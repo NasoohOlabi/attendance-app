@@ -992,6 +992,11 @@ export function fingerprintHeaderMissing(rows) {
   return !(rows || []).some((row) => (row || []).some((cell) => String(cell ?? "").trim()));
 }
 
+export function isFingerprintHeader(row) {
+  const cells = (row || []).map(headerText);
+  return cells.some(isFingerprintIdHeader) && cells.some(isFingerprintTemplateHeader);
+}
+
 /** One id and one template per row. Several rows may share an id. */
 export function parseFingerprintSheet(rows) {
   const list = rows || [];

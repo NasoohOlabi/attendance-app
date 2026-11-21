@@ -1,6 +1,6 @@
 # Masjid attendance
 
-Local Windows app for the Bouty mosque roster. A finger on the ZK4500 queues attendance for the student's Marif ID. The settings file is optional and local. Bouty credentials are encrypted for the Windows user and remain in the Electron main process.
+Local Windows app for the Bouty mosque roster. A finger on the ZK4500 queues attendance for the student's Bouty ID. The settings file is optional and local. Bouty credentials are encrypted for the Windows user and remain in the Electron main process.
 
 Scanner source lives in `scanner/`. `node scripts/scanner-release.mjs` publishes the self-contained exe into `staging/scanner/`, and dev launches the path in `zk4500Cli`. `scanner/AGENTS.md` is the capture and match contract. This file is the host app and the bugs that showed up while wiring the two together. The installer copies that staged folder to `resources/scanner/`. The packaged app runs that copy.
 
@@ -46,11 +46,11 @@ The place cue is an inline SVG of a finger and the sensor (`#place`):
 
 ## Bouty attendance
 
-Roster identity is the Marif ID in the student's Bouty source notes. Require an exact source ID and a unique active enrolment. Resolve the Damascus date to an existing attendance day and group session on Bouty before writing. The app sends individual present or absent operations with stable retry IDs. Never create days or group sessions from a scan.
+Roster identity is the Bouty student ID. Use the Marif ID from the source notes to migrate unambiguous legacy links. Require a unique active enrolment. Resolve the Damascus date to an existing attendance day and group session on Bouty before writing. The app sends individual present or absent operations with stable retry IDs. Never create days or group sessions from a scan.
 
 Reuse one isolated Bouty session across roster lookups and attendance sync. Save verified credentials with Windows safeStorage in `~/Masjid/v1/config/bouty-account.enc`. Sign-out clears the file and session. Keep pending marks tied to the original account. The Today list and dashboard summarize local Bouty operations, including those awaiting sync.
 
-Fingerprint templates and enrollment links are local. Match `s-{id}.txt` plus numbered copies like `s-{id}--2.txt`. Keep the primary link in the index and preserve older copies on enrollment. Deleting prints removes local copies and links. Google Sheets credentials, IDs, and pending writes have no role in the running app.
+Match the index's primary template and numbered copies such as `s-{id}--2.txt`. Preserve existing template names during migration and keep older copies on enrollment. Deleting prints removes local copies and links. The configured Google Sheets fingerprint tab is an append-only backup of linked samples. Keep Google credentials in the main process and keep attendance writes on Bouty.
 
 Diagnostic lines go to `~/Masjid/logs/attendance-YYYY-MM-DD.log`. Look there first for scanner errors, Bouty failures, and renderer errors.
 

@@ -9,7 +9,10 @@ import { createBoutyCredentials, createBoutyQueue, createBoutyRosterCache, parse
 import { createBoutySync } from "../bouty-sync.mjs";
 import { applyBoutyProfile, boutySourceLinks, boutyStudentChoices, migrateBoutyPrintLinks, normalizeBoutySourceId } from "../bouty-resolve.mjs";
 import { legacyUserDataPath, loadConfig, scannerExeInResources, updateChannelPreferencePath } from "../config.mjs";
+import { createCredentialStore, credentialFile } from "../credentials.mjs";
+import { createGoogle } from "../google.mjs";
 import { appLogFile, startAppLog } from "../log.mjs";
+import { backupPrints, readPrintBackup } from "../print-backup.mjs";
 import { updaterChannel, updaterErrorDetails, updaterInfoDetails, updaterShouldOffer } from "../update.mjs";
 import { appendScanTrace, beginScanAttempt, mergeCapturedFiles, planScanRetry, runIdentify, SCAN_OUTAGE_MESSAGE, SCAN_RETRY_PAUSE_MS } from "../scan.mjs";
 import { createHash } from "node:crypto";
@@ -80,6 +83,9 @@ const boutyNames = new Map();
 let rosterCache;
 let roster = null;
 let rosterRefresh = null;
+let printBackupPending = false;
+let printBackupRunning = false;
+let printBackupError = false;
 
 function accountKey(username) {
   return createHash("sha256").update(username.trim().toLowerCase()).digest("hex");
@@ -802,10 +808,44 @@ async function runLoop(config, gen) {
 async function ensureRoster(config, profiles = roster) {
   try {
     const index = await loadIndex(config.fingerprintDir);
-    if (migrateBoutyPrintLinks(index, profiles)) await saveIndex(config.fingerprintDir, index);
-    else await writeLog(config.fingerprintDir, index);
+    if (migrateBoutyPrintLinks(index, profiles)) {
+      await saveIndex(config.fingerprintDir, index);
+      requestPrintBackup();
+    } else await writeLog(config.fingerprintDir, index);
   } catch (err) {
     console.error(err);
+  }
+}
+
+function requestPrintBackup() {
+  printBackupPending = true;
+  void syncPrintBackup();
+}
+
+async function syncPrintBackup() {
+  const config = currentConfig;
+  if (!printBackupPending || printBackupRunning || !net.isOnline() ||
+      !config?.logSpreadsheetId || config.fingerprintSheetGid == null) return;
+  printBackupRunning = true;
+  printBackupPending = false;
+  try {
+    const prints = await exclusive(() => config === currentConfig ? readPrintBackup(config.fingerprintDir) : []);
+    if (prints.length && config === currentConfig) {
+      const store = createCredentialStore({ file: credentialFile(config.fingerprintDir), encryption: safeStorage });
+      const client = await createGoogle(config, await store.read());
+      if (config === currentConfig) {
+        const added = await backupPrints(client, config.logSpreadsheetId, config.fingerprintSheetGid, prints);
+        if (added || printBackupError) console.log(`Fingerprint backup complete. Added ${added} samples.`);
+      }
+    }
+    printBackupError = false;
+  } catch {
+    printBackupPending = true;
+    if (!printBackupError) console.error("Fingerprint backup is waiting to sync. Check the Google account and fingerprint tab.");
+    printBackupError = true;
+  } finally {
+    printBackupRunning = false;
+    if (printBackupPending && !printBackupError) void syncPrintBackup();
   }
 }
 
@@ -839,6 +879,7 @@ async function startLoop() {
   }
   currentConfig = config;
   await exclusive(() => ensureRoster(config));
+  requestPrintBackup();
   publish({
     phase: "ready",
     headline: "Place a finger",
@@ -1049,6 +1090,7 @@ async function assignStudent(key) {
     enroll: null,
   });
   const saved = await writeBatch(config, student, savedBodies);
+  requestPrintBackup();
   const draft = saved.draft;
   if (batchSave) {
     batch = [];
@@ -1584,6 +1626,7 @@ if (!app.requestSingleInstanceLock()) {
       void boutySync.sync();
       setInterval(() => {
         void boutySync.sync();
+        void syncPrintBackup();
         if (boutyOwner && !roster && net.isOnline()) void refreshRoster().catch(() => {});
         void publishAttendance().catch((error) => publishBouty(error.message));
       }, (currentConfig?.syncIntervalSeconds || 60) * 1000).unref();

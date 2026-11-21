@@ -1,6 +1,6 @@
 # Masjid Attendance
 
-Windows attendance app for the Bouty mosque roster. A ZK4500 scan identifies a student by their Bouty ID and queues attendance for Bouty. Fingerprint templates stay on this computer.
+Windows attendance app for the Bouty mosque roster. A ZK4500 scan identifies a student by their Bouty ID and queues attendance for Bouty. The app can back up saved fingerprint templates to Google Sheets.
 
 ## Set up development
 
@@ -43,7 +43,13 @@ The advanced settings allow explicit IDs when automatic lookup is unavailable:
 
 Use the IDs shown on Bouty. Keep earlier dates in the mapping until their queued scans have synced. Adding a group session on Bouty can mark the entire group present, so review the defaults before creating one. **Undo** sends an Absent status for the selected student.
 
-Existing local templates stay in `~/Masjid/v1/fingerprints/templates/`. Delete individual templates from **Fingerprints**, or clear them all in **Settings**. Bouty credentials and its attendance queue live in `~/Masjid/v1/config/`. Historical Google Sheets and the old Sheets queue are left on disk or in Google Drive and can be consulted separately.
+Local templates live in `~/Masjid/v1/fingerprints/templates/`. Delete individual templates from **Fingerprints**, or clear them all in **Settings**. Those actions remove local copies. Existing Sheets backup rows are retained. Bouty credentials and the attendance queue live in `~/Masjid/v1/config/`.
+
+### Fingerprint backup
+
+Set `logSpreadsheetId` and `fingerprintSheetGid` in the local `attendance.config.json` to use the existing fingerprint tab. Installed builds read that file from `%APPDATA%\attendance-service`. Give the backup service account edit access to the sheet. The app reuses the imported Windows-encrypted account if present, or reads the key from the private `serviceAccountJson` path. A new backup tab can start empty. The app adds the `student_id`, `fingerprint`, and `created_at` headers.
+
+The backup copies linked local samples on startup and after enrollment or migration. The app retries after a network failure and preserves previous rows. New rows use the Bouty ID when the fingerprint is linked to one. Restrict access to the backup sheet because it contains fingerprint templates. Attendance and roster lookup use Bouty.
 
 ## Verify and build
 

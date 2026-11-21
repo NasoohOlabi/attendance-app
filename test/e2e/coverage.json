@@ -16,6 +16,7 @@
     "deleting one student's fingerprints preserves the other student's local files",
     "each Arabic font is selectable and the latest choice survives restart",
     "fingerprint deletion confirmation can be canceled three ways",
+    "fingerprints back up after a Sheets outage without duplicating on restart",
     "fragmented UTF-8 scanner output still identifies an Arabic roster name",
     "language direction and choice survive switching and restart",
     "ready window keeps its default size and honors its minimum size",

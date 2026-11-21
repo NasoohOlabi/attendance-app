@@ -8,6 +8,26 @@ import {
   writeAttendanceCell,
 } from "../../src/google.mjs";
 import { createSheets } from "../e2e/fixtures/sheets.mjs";
+import { backupPrints } from "../../src/print-backup.mjs";
+
+test("backup preserves historical rows and rechecks a write whose response was lost", async () => {
+  const sheets = createSheets();
+  const tab = sheets.grid("FingerPrints");
+  tab.rows.push(["00 00 000 005", "old-sample"]);
+  const prints = [{ studentId: "bouty:9", template: "new-sample" }];
+  const client = { request: async (request) => {
+    const result = await sheets.request(request);
+    if (request.method === "POST") throw new Error("connection closed");
+    return result;
+  } };
+  await assert.rejects(backupPrints(client, "pages-test", 3, prints), /connection closed/);
+  assert.equal(await backupPrints(client, "pages-test", 3, prints), 0);
+  assert.deepEqual(tab.rows.slice(1).map((row) => row.slice(0, 2)), [
+    ["00 00 000 005", "old-sample"], ["bouty:9", "new-sample"],
+  ]);
+  await assert.rejects(backupPrints(client, "pages-test", 2, prints), /Invalid fingerprint backup tab header/);
+  assert.equal(sheets.requests.filter((request) => request.method === "POST").length, 1);
+});
 
 test("the Sheets fixture serves real grid reads and restricts endpoints", async () => {
   const sheets = createSheets();
