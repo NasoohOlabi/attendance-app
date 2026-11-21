@@ -14,6 +14,26 @@ async function atomicWrite(file, bytes) {
   }
 }
 
+export function createBoutyRosterCache(file, encryption) {
+  return {
+    async read(owner) {
+      try {
+        const bytes = await readFile(file);
+        const decrypted = await encryption.decryptStringAsync(bytes);
+        const data = JSON.parse(decrypted.result);
+        return data.owner === owner && Array.isArray(data.students) ? data.students : null;
+      } catch {
+        return null;
+      }
+    },
+    async save(owner, students) {
+      const encrypted = await encryption.encryptStringAsync(JSON.stringify({ owner, students }));
+      await atomicWrite(file, encrypted);
+    },
+    clear: () => rm(file, { force: true }),
+  };
+}
+
 /** Reject ambiguous mappings instead of silently marking the wrong enrolment. */
 export function parseBoutyMapping(rows) {
   if (!Array.isArray(rows)) throw new Error("Bouty mapping must be a list.");

@@ -27,6 +27,9 @@ test("Bouty sign-in persists and sign-out clears credentials across restart", as
   await app.page.locator("#attendance").click();
   await app.page.locator("#mark-manual").click();
   await expect(app.page.locator("#manual-list")).toContainText("Website Student");
+  await app.page.locator("#manual-list button").filter({ hasText: "Website Student" }).click();
+  await expect(app.page.locator("#confirm")).toBeVisible();
+  await app.page.locator("#confirm-cancel").click();
   await app.electron.evaluate(() => { globalThis.boutyTestExpired = true; });
   await app.page.locator("#bouty-roster-refresh").click();
   await expect(app.page.locator("#manual-list")).toContainText("Website Student");
@@ -50,7 +53,7 @@ test("Bouty keeps offline attendance with the original account", async ({ app })
   await app.page.locator("#attendance").click();
   await app.electron.evaluate(() => { globalThis.boutyTestOffline = true; });
   await app.page.locator("#mark-manual").click();
-  await app.page.locator("#manual-list button").click();
+  await app.page.locator("#manual-list button").filter({ hasText: "Website Student" }).click();
   await app.page.locator("#confirm-ok").click();
   await expect(app.page.locator("#today-list")).toContainText("Website Student");
   await expect.poll(async () => JSON.parse(await readFile(file, "utf8")).items.length).toBe(1);
@@ -85,7 +88,6 @@ test("Bouty roster can refresh, open a profile, and mark attendance on the websi
   await app.page.locator("#mark-manual").click();
   const list = app.page.locator("#manual-list");
   await expect(list).toContainText("Website Student");
-  await app.page.locator("#bouty-roster-next").click();
   await expect(list).toContainText("Another Student");
   await app.electron.evaluate(() => { globalThis.boutyTestName = "Refreshed Student"; });
   await app.page.locator("#bouty-roster-refresh").click();
@@ -105,6 +107,39 @@ test("Bouty roster can refresh, open a profile, and mark attendance on the websi
   expect(app.captures).toEqual([]);
   expect(await app.electron.evaluate(() => globalThis.boutyTestLogins)).toBe(1);
   expect(app.sheets.requests).toEqual([]);
+});
+
+test("saved Bouty students support offline enrollment and manual attendance after restart", async ({ app }) => {
+  await app.page.locator("#settings").click();
+  await signIn(app);
+  await app.page.locator("#attendance").click();
+  await app.page.locator("#mark-manual").click();
+  await expect(app.page.locator("#manual-list")).toContainText("Another Student");
+  const cache = path.join(app.home, "Masjid/v1/config/bouty-roster.enc");
+  expect((await readFile(cache)).includes(Buffer.from("Website Student"))).toBe(false);
+  await app.restart();
+  await app.electron.evaluate(() => { globalThis.boutyTestDisconnected = true; });
+  await app.page.locator("#mark-manual").click();
+  await app.page.locator("#manual-list button").filter({ hasText: "Another Student" }).click();
+  await expect(app.page.locator("#confirm-name")).toHaveText("Another Student");
+  await app.page.locator("#confirm-ok").click();
+  await expect(app.page.locator("#today-list")).toContainText("Another Student");
+
+  const index = await app.index();
+  index.pending = { capturedAt: "2026-10-12T13:55:03.000Z" };
+  await writeFile(path.join(app.prints, "index.json"), JSON.stringify(index));
+  await writeFile(path.join(app.prints, "pending.txt"), "synthetic-offline-print");
+  await app.restart();
+  await app.electron.evaluate(() => { globalThis.boutyTestDisconnected = true; });
+  await expect(app.page.locator("#pending")).toBeVisible();
+  const students = app.page.locator("#list button");
+  await expect(students).toHaveCount(2);
+  await app.page.locator("#search").fill("Website");
+  await expect(students).toHaveCount(1);
+  await students.click();
+  await expect(app.page.locator("#last-name")).toHaveText("Website Student");
+  await expect(app.page.locator("#today-list")).toContainText("Website Student");
+  expect(await app.files()).toContain("s-00-00-000-005.txt");
 });
 
 test("Bouty picker and scan card use website student information", async ({ app }) => {

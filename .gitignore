@@ -22,6 +22,8 @@ service-account.enc
 service-account.enc.*.tmp
 bouty-account.enc
 bouty-account.enc.*.tmp
+bouty-roster.enc
+bouty-roster.enc.*.tmp
 bouty-outbox.json
 service-account*.json
 *-service-account*.json

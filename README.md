@@ -26,6 +26,8 @@ Sign in once in **Settings**. The app verifies the account on Bouty and saves th
 
 On **Attendance**, use **Search students** to find students by name or number. Page through the roster or select **Refresh** to reload it. Select a student to view their profile or mark them present. Fingerprint enrollment and automatic attendance use the Marif source ID from the student's Bouty notes. The active course needs an existing attendance day with group sessions.
 
+After the first successful roster download, the app keeps an encrypted copy for offline student search, fingerprint enrollment, and manual attendance. Attendance waits in the queue until Bouty is reachable. **Refresh** replaces the saved list after a complete download, and signing out clears it.
+
 Today and the dashboard reflect attendance recorded by this installation. The arrival clock shows the local scan time. Manage corrections and view attendance from other devices on Bouty.
 
 The advanced settings allow explicit IDs when automatic lookup is unavailable:
