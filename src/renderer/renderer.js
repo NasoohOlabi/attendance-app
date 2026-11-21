@@ -42,6 +42,11 @@ const updateProgress = document.querySelector("#update-progress");
 const updateDialogAction = document.querySelector("#update-dialog-action");
 const updateDialogClose = document.querySelector("#update-dialog-close");
 const cancel = document.querySelector("#cancel");
+const testModeSwitch = document.querySelector("#test-mode");
+const testModeIndicator = document.querySelector("#test-mode-indicator");
+const testModeProgress = document.querySelector("#test-mode-progress");
+const persistentSettings = document.querySelector("#persistent-settings");
+let switchingTestMode = false;
 const confirm = document.querySelector("#confirm");
 const confirmTitle = document.querySelector("#confirm-title");
 const confirmWho = document.querySelector("#confirm-who");
@@ -470,7 +475,7 @@ async function undoToday(person) {
   const accepted = await askConfirm({
     title: "Remove from today?",
     name: person.name,
-    detail: "Set this student's attendance to Absent on Bouty.",
+    detail: lastState?.testMode ? "Remove this student from today's test attendance." : "Set this student's attendance to Absent on Bouty.",
     confirmLabel: "Remove",
   });
   if (!accepted) return;
@@ -498,11 +503,32 @@ function renderProfile(fields, chips = lastChips, lines = lastFields) {
 }
 
 function render(state) {
+  if (lastState && Boolean(lastState.testMode) !== Boolean(state.testMode)) {
+    closeConfirm(false);
+    closeManualPick();
+    dashboardOpen = false;
+    ++printsGen;
+    ++filterGen;
+    clearTimeout(searchTimer);
+    list.replaceChildren();
+    printsList.replaceChildren();
+    search.value = "";
+    printsSearch.value = "";
+    todayKey = "";
+  }
   lastState = state;
   // Keep the installed build visible even when settings was already open.
   const version = document.querySelector("#app-version");
   if (version) version.textContent = state.appVersion || state.update?.version || "—";
-  renderUpdate(state.update);
+  const testing = Boolean(state.testMode);
+  testModeSwitch.checked = testing;
+  testModeSwitch.disabled = switchingTestMode;
+  testModeIndicator.hidden = !testing;
+  persistentSettings.disabled = testing;
+  document.querySelector("#save").hidden = testing;
+  cancel.textContent = translate(testing ? "Done" : "Cancel");
+  renderUpdate(testing ? null : state.update);
+  if (testing) updateDialog.hidden = true;
   const signedIn = Boolean(state.bouty?.enabled);
   document.querySelector("#bouty-sign-in").hidden = signedIn;
   document.querySelector("#sign-out-bouty").hidden = !signedIn;
@@ -592,7 +618,7 @@ function render(state) {
   }
   error.hidden = !state.error;
   error.textContent = translate(state.error || "");
-  sync.textContent = translate(state.bouty?.message || "");
+  sync.textContent = testing ? "" : translate(state.bouty?.message || "");
 }
 
 dashboard.addEventListener("click", async () => {
@@ -780,6 +806,29 @@ updateDialogAction.addEventListener("click", async () => {
 });
 updateDialogClose.addEventListener("click", () => { updateDialog.hidden = true; });
 cancel.addEventListener("click", () => window.attendance.closeSettings());
+testModeProgress.addEventListener("cancel", (event) => event.preventDefault());
+testModeSwitch.addEventListener("change", async () => {
+  const enabled = testModeSwitch.checked;
+  testModeSwitch.checked = Boolean(lastState?.testMode);
+  switchingTestMode = true;
+  testModeSwitch.disabled = true;
+  testModeProgress.showModal();
+  try {
+    const result = await window.attendance.setTestMode(enabled);
+    if (!result?.ok) {
+      error.hidden = false;
+      error.textContent = translate(result?.error || "Could not change test mode.");
+    }
+  } catch {
+    error.hidden = false;
+    error.textContent = translate("Could not change test mode.");
+  } finally {
+    testModeProgress.close();
+    switchingTestMode = false;
+    testModeSwitch.disabled = false;
+    testModeSwitch.checked = Boolean(lastState?.testMode);
+  }
+});
 document.querySelector("#clear-prints").addEventListener("click", async () => {
   const button = document.querySelector("#clear-prints");
   if (typeof window.attendance.clearFingerprints !== "function") {

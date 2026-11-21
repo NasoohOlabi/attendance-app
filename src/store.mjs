@@ -93,7 +93,7 @@ export function logPath(dir) {
   return path.join(dir, "log.json");
 }
 
-function isRosterTemplate(name) {
+export function isRosterTemplate(name) {
   if (!name || path.basename(name) !== name) return false;
   if (name.toLowerCase() === "pending.txt") return false;
   return /^[st]-.+\.txt$/i.test(name);

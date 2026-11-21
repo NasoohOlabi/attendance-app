@@ -64,7 +64,7 @@ export function createAppLogger(home = homedir()) {
 let attached = false;
 
 /** Copy console and crash lines into ~/Masjid/logs. Safe to call once per process. */
-export function startAppLog(home = homedir()) {
+export function startAppLog(home = homedir(), shouldRecord = () => true) {
   if (attached) return;
   attached = true;
   const logger = createAppLogger(home);
@@ -77,7 +77,7 @@ export function startAppLog(home = homedir()) {
     const original = console[method].bind(console);
     console[method] = (...args) => {
       original(...args);
-      logger.record(level, args);
+      if (shouldRecord()) logger.record(level, args);
     };
   }
   process.on("unhandledRejection", (reason) => {

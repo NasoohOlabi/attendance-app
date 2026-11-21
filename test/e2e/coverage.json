@@ -8,6 +8,7 @@
     "Done saves three kept scans as separate files locally",
     "Rescan replaces only the latest kept capture",
     "a hung fake capture respects both timeout windows before the host stops it",
+    "a queued live mark survives a practice undo and syncs after exit",
     "a saved pending print is offered for assignment after restart",
     "a second assignment adds a print and keeps the first",
     "a timed-out capture neither marks attendance nor opens enrollment, and the next capture works",
@@ -26,6 +27,9 @@
     "settings save persists the update track without requiring Sheets",
     "smoke keeps settings reachable when the scanner path is missing",
     "smoke uses the real preload and isolated built Electron app",
+    "starting test mode preserves an unfinished live enrollment",
+    "startup discards a test enrollment left by an abrupt exit",
+    "test scans and manual attendance are discarded before live attendance resumes",
     "the print protocol serves the current capture and rejects an unknown slot",
     "unassigned scans collected after More are dropped when the app restarts"
 ]

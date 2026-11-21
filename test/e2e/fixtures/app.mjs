@@ -20,6 +20,11 @@ async function jsonBody(request) {
   return body ? JSON.parse(body) : {};
 }
 
+function isRunning(pid) {
+  try { process.kill(pid, 0); return true; }
+  catch (err) { if (err.code === "ESRCH") return false; throw err; }
+}
+
 export const test = base.extend({
   fixtureOptions: [{}, { option: true }],
   app: async ({ fixtureOptions }, use, testInfo) => {
@@ -51,10 +56,7 @@ export const test = base.extend({
     const transcript = [];
     const runtimeErrors = [];
     const gates = [];
-    const liveScannerPids = () => [...new Set(captures.filter((item) => item.type === "started").map((item) => item.pid))].filter((pid) => {
-      try { process.kill(pid, 0); return true; }
-      catch (error) { if (error.code === "ESRCH") return false; throw error; }
-    });
+    const liveScannerPids = () => [...new Set(captures.filter((item) => item.type === "started").map((item) => item.pid))].filter(isRunning);
     let stopping = false;
     const send = (response, value) => {
       response.writeHead(200, { "content-type": "application/json" });
@@ -140,7 +142,7 @@ export const test = base.extend({
         expect(result).toEqual({ ok: true });
       }
     };
-    const stop = async () => {
+    const stop = async ({ abrupt = false } = {}) => {
       stopping = true;
       if (page && !page.isClosed()) await page.evaluate(() => window.attendance.openSettings());
       for (const gate of gates.splice(0)) gate.release();
@@ -151,7 +153,12 @@ export const test = base.extend({
         const trace = testInfo.outputPath(`trace-${Date.now()}.zip`);
         await electron.context().tracing.stop({ path: trace }).catch((error) => runtimeErrors.push(error.message));
         await testInfo.attach("trace", { path: trace, contentType: "application/zip" });
-        await electron.close();
+        if (abrupt) {
+          // The fake scanner has exited. End this fixture's Electron main process before quit hooks run.
+          const mainPid = await electron.evaluate(() => process.pid);
+          process.kill(mainPid);
+          await expect.poll(() => isRunning(mainPid)).toBe(false);
+        } else await electron.close();
         electron = null;
       }
       await expect.poll(liveScannerPids).toEqual([]);
@@ -175,7 +182,7 @@ export const test = base.extend({
         if (response) send(response, value);
         else scripts.push(value);
       },
-      async restart() { await stop(); await connect(); },
+      async restart(options) { await stop(options); await connect(); },
       async state() { return page.evaluate(() => window.attendance.getState()); },
       async outbox() {
         try { return JSON.parse(await readFile(path.join(home, "Masjid/attendance-outbox.json"), "utf8")); }
