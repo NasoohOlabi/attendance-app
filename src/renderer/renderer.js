@@ -592,26 +592,12 @@ function renderProfile(fields, chips = lastChips, lines = lastFields) {
   lines.replaceChildren();
   for (const field of Array.isArray(fields) ? fields : []) {
     const value = translate(field.value);
-    if (field.kind === "phone" || field.kind === "line") {
-      const dt = document.createElement("dt");
-      dt.textContent = field.label;
-      const dd = document.createElement("dd");
-      dd.dir = field.kind === "phone" ? "ltr" : "auto";
-      dd.textContent = value;
-      lines.append(dt, dd);
-      continue;
-    }
-    const chip = document.createElement("span");
-    if (field.kind === "meter") chip.className = "is-meter";
-    else if (field.kind === "flag") chip.className = field.value === "No" ? "is-off" : "is-flag";
-    chip.title = field.label;
-    if (field.kind !== "meter") {
-      const label = document.createElement("small");
-      label.textContent = field.label;
-      chip.append(label);
-    }
-    chip.append(document.createTextNode(value));
-    chips.append(chip);
+    const dt = document.createElement("dt");
+    dt.textContent = field.label;
+    const dd = document.createElement("dd");
+    dd.dir = field.kind === "phone" ? "ltr" : "auto";
+    dd.textContent = value;
+    lines.append(dt, dd);
   }
   chips.hidden = chips.childElementCount === 0;
   lines.hidden = lines.childElementCount === 0;
@@ -1088,6 +1074,7 @@ async function confirmManual(student, website = false) {
     studentId: student.studentId,
     studentName: student.studentName,
     rowNumber: student.rowNumber,
+    fields: student.fields,
   });
   if (!result?.ok && result?.error) {
     error.hidden = false;
@@ -1105,6 +1092,7 @@ markManual.addEventListener("click", () => {
   refreshManual();
 });
 manualSearch.addEventListener("input", () => {
+  manualPick.hidden = false;
   boutyRosterPage = 1;
   if (lastState?.config?.attendanceDestination !== "bouty") return refreshManual();
   manualGen += 1;

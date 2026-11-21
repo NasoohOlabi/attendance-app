@@ -60,12 +60,12 @@
           </svg>
           <span id="place-label" class="place-label" data-i18n="One moment">One moment</span>
         </div>
-        <button id="mark-manual" class="secondary" type="button" data-i18n="Mark without a finger">Mark without a finger</button>
+        <label class="manual-search-label">
+          <span data-i18n="Mark without a finger">Mark without a finger</span>
+          <input id="manual-search" type="search" data-i18n-placeholder="Type a name" placeholder="Type a name" autocomplete="off" />
+        </label>
+        <button id="mark-manual" class="secondary" type="button" data-i18n="Search students">Search students</button>
         <div id="manual-pick" hidden>
-          <label>
-            <span data-i18n="Search students">Search students</span>
-            <input id="manual-search" type="search" data-i18n-placeholder="Type a name" placeholder="Type a name" autocomplete="off" />
-          </label>
           <p id="manual-empty" class="detail" aria-live="polite" hidden></p>
           <ul id="manual-list"></ul>
           <div id="bouty-roster-actions" class="actions" hidden>
@@ -83,7 +83,7 @@
         </div>
         <div class="result">
           <article id="last" class="card" hidden>
-            <p class="label" data-i18n="Last match">Last match</p>
+            <p class="label" data-i18n="Student details">Student details</p>
             <strong id="last-name" dir="auto"></strong>
             <p id="last-meta" class="profile-meta"></p>
             <div id="last-chips" class="profile-chips" hidden></div>

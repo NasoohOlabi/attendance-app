@@ -767,8 +767,9 @@ function publishShown(extra = {}) {
 }
 
 /** Show the mark now. The sheet write runs after this returns. */
-async function acceptPresent(student) {
+async function acceptPresent(student, at = new Date().toISOString()) {
   const person = queuedFrom(student);
+  person.at = at;
   person.destination = currentConfig?.attendanceDestination || "sheet";
   if (!person.studentId) return { op: "missing-id" };
   if (person.destination === "bouty") {
@@ -2295,9 +2296,13 @@ function registerIpc() {
     }
   });
   ipcMain.handle("markPresent", async (_event, student) => {
+    const at = new Date().toISOString();
     try {
-      const result = await acceptPresent(student);
+      const result = await acceptPresent(student, at);
       if (result?.op === "missing-id") return { ok: false, error: "This student has no Marif id." };
+      const match = lastMatchOf(student, at);
+      publish({ lastMatch: { ...match, studentName: student.studentName || match.studentName,
+        fields: student.fields || match.fields, profileStatus: "" } });
       return { ok: true };
     } catch (err) {
       const message = err?.message || "The sheet could not be updated.";

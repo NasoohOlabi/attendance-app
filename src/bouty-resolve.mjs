@@ -93,7 +93,7 @@ function siteProfile(data, html, studentNumber = "") {
   }
   add("رقم الطالب", studentNumber);
   add("المرحلة الدراسية", optionText("student-grade-level", data.grade_level_id));
-  if (data.birth_date) add("سنة الميلاد", String(data.birth_date).slice(0, 4));
+  add("تاريخ الميلاد", data.birth_date);
   add("ولي الأمر", optionText("student-parent", data.parent_id), "line");
   add("المدرسة", data.school_name, "line");
   add("هاتف الطالب", data.student_phone, "phone");

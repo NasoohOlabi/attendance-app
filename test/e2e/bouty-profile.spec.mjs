@@ -75,11 +75,13 @@ test("Bouty roster can refresh, open a profile, and mark attendance on the websi
   await app.electron.evaluate(() => { globalThis.boutyTestName = "Refreshed Student"; });
   await app.page.locator("#bouty-roster-refresh").click();
   await expect(list).toContainText("Refreshed Student");
+  await app.page.locator("#manual-search").fill("Refreshed");
   await list.getByRole("button").click();
   await expect(app.page.locator("#confirm-profile-fields")).toContainText("Website School");
-  await expect(app.page.locator("#confirm-profile-chips")).toContainText("Website Group");
+  await expect(app.page.locator("#confirm-profile-fields")).toContainText("Website Group");
   await expect(app.page.locator("#confirm-name")).toHaveText("Website Student");
   await app.page.locator("#confirm-ok").click();
+  await expect(app.page.locator("#last-name")).toHaveText("Website Student");
   await expect.poll(() => app.electron.evaluate(() => globalThis.boutyTestAttendance)).toEqual([
     expect.objectContaining({ day_id: 22, entity_id: 31, status_id: 1 }),
   ]);
