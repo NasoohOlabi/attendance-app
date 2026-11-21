@@ -11,8 +11,9 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 
 test("manual attendance sends only the enrolment operation and requires confirmation", async () => {
   const requests = [];
-  const origin = "https://albouty.saas.hassiba.tech";
+  const origin = "https://albouty.saas.alkheir-platform.com";
   const fetch = async (url, options) => {
+    assert.equal(new URL(url).origin, origin);
     requests.push({ url, options });
     let body = "";
     let finalUrl = url;
@@ -206,35 +207,47 @@ test("an ambiguous student stays queued without blocking other students", async 
 });
 
 test("Bouty resolves the exact source ID, active enrolment, day and group without guessing by name", async () => {
+  const origin = "https://albouty.saas.alkheir-platform.com";
   const snapshot = (name, data) => JSON.stringify({ memo: { name }, data });
   const escaped = (text) => text.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
-  const pageHtml = (name, data, inner = "") => `<script data-update-uri="https://albouty.saas.hassiba.tech/livewire/update"></script><div wire:snapshot="${escaped(snapshot(name, data))}">${inner}</div>`;
+  const pageHtml = (name, data, inner = "") => `<script data-update-uri="/livewire-test/update"></script><div wire:snapshot="${escaped(snapshot(name, data))}">${inner}</div>`;
   const rows = '<table><tr><td>Other</td><td>7001</td><td><button wire:click="edit(11)"></button></td></tr><tr><td>Site Name</td><td>7002</td><td><button wire:click="edit(12)"></button></td></tr></table>';
   const student = pageHtml("students.index", {}, rows);
-  const enrollments = pageHtml("enrollments.index", { courseFilter: "1" }, '<table><tr><td>1</td><td>Site Name</td><td>Website Group</td><td><button wire:click="edit(31)"></button></td></tr></table>');
+  const enrollments = pageHtml("enrollments.index", { courseFilter: "1" }, '<table><tr><td>1</td><td>Site Name</td><td>Website Group</td><td>Winter</td><td><button wire:click="edit(31)"></button></td></tr></table>');
   const attendance = pageHtml("attendance.index", { course_id: "1" });
-  const dayRows = '<select id="attendance-day-course"><option value="1">Winter</option></select><table><tr><td>31-10-2026</td><td>Winter</td><td><a href="https://albouty.saas.hassiba.tech/attendance/days/students/22">open</a></td></tr></table>';
+  const dayRows = '<select id="attendance-day-course"><option value="1">Winter</option></select><table><tr><td>31-10-2026</td><td>Winter</td><td><a href="https://albouty.saas.alkheir-platform.com/attendance/days/students/22">open</a></td></tr></table>';
   const calls = [];
+  let hasAttendanceDay = true;
   const page = async (url, opts = {}) => {
     calls.push(url);
     if (url === "/students") return { text: async () => student };
     if (url === "/enrollments") return { text: async () => enrollments };
     if (url === "/attendance") return { text: async () => attendance };
-    if (url === "/attendance/days/students/22") return { text: async () => '<a href="https://albouty.saas.hassiba.tech/student-attendance/groups/8">group</a>' };
+    if (url === "/attendance/days/students/22") return { text: async () => '<a href="https://albouty.saas.alkheir-platform.com/student-attendance/groups/8">group</a>' };
     if (url === "/student-attendance/groups/8") return { text: async () => '<table><tr data-attendance-type="student" data-attendance-entity-id="31"><td><select><option value="1">Present</option><option value="2">Absent</option></select></td></tr></table>' };
+    assert.equal(url, "/livewire-test/update");
     const body = JSON.parse(opts.body), request = body.components[0], state = JSON.parse(request.snapshot);
     const method = request.calls[0]?.method, id = request.calls[0]?.params[0];
-    if (state.memo.name === "students.index" && method === "edit") Object.assign(state.data, { notes: `معرف المصدر: ${id === 11 ? "002" : "001"}`, first_name: "Same", last_name: "Name", school_name: "From Bouty" });
+    if (state.memo.name === "students.index" && method === "edit") Object.assign(state.data, { editingId: id, notes: `معرف المصدر: ${id === 11 ? "002" : "001"}`, first_name: "Same", last_name: "Name", school_name: "From Bouty" });
     if (state.memo.name === "enrollments.index" && method === "edit") Object.assign(state.data, { student_id: 12, status: "active" });
-    const html = state.memo.name === "students.index" ? student : state.memo.name === "enrollments.index" ? enrollments : pageHtml("attendance.index", state.data, dayRows);
+    const html = state.memo.name === "students.index" ? student : state.memo.name === "enrollments.index" ? enrollments :
+      pageHtml("attendance.index", state.data, hasAttendanceDay ? dayRows : dayRows.split("<table>")[0]);
     return { json: async () => ({ components: [{ snapshot: JSON.stringify(state), effects: { html } }] }) };
   };
-  const resolve = createBoutyResolver({ page, csrf: () => "token" });
+  const resolve = createBoutyResolver({ origin, page, csrf: () => "token" });
   assert.deepEqual(await resolve.student({ studentId: "001", studentName: "Old Name" }), {
-    id: 12, sourceIds: ["001"], studentName: "Same Name", fields: [{ label: "رقم الطالب", value: "7002", kind: "chip" }, { label: "المدرسة", value: "From Bouty", kind: "line" }, { label: "المجموعة", value: "Website Group", kind: "chip" }],
+    id: 12, studentNumber: "7002", sourceIds: ["001"], studentName: "Same Name", fields: [
+      { label: "رقم الطالب", value: "7002", kind: "chip" },
+      { label: "المدرسة", value: "From Bouty", kind: "line" },
+      { label: "ملاحظات", value: "معرف المصدر: 001", kind: "line" },
+      { label: "المجموعة", value: "Website Group", kind: "chip" },
+      { label: "الدورة", value: "Winter", kind: "chip" },
+    ],
   });
   assert.deepEqual(await resolve({ studentId: "001", studentName: "Same Name", date: "2026-10-31", kind: "present" }), { dayId: 22, enrollmentId: 31, statusId: 1 });
   assert.deepEqual(await resolve({ studentId: "001", studentName: "Same Name", date: "2026-10-31", kind: "absent" }), { dayId: 22, enrollmentId: 31, statusId: 2 });
   await assert.rejects(resolve({ studentId: "003", studentName: "Same Name", date: "2026-10-31", kind: "present" }), /identity is missing/);
+  hasAttendanceDay = false;
+  await assert.rejects(resolve({ studentId: "001", studentName: "Same Name", date: "2026-10-31", kind: "present" }), /no attendance day/);
   assert.equal(calls.includes("/attendance/offline-sync"), false);
 });

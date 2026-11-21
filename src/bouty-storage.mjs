@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { canonicalStudentId } from "./store.mjs";
+import { canonicalStudentId, outboxDay } from "./store.mjs";
 
 async function atomicWrite(file, bytes) {
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -47,6 +47,7 @@ export function createBoutyCredentials({ file, encryption, platform = process.pl
   }
   return {
     save: (account) => serial(() => save(account)),
+    clear: () => serial(() => rm(file, { force: true })),
     read: () => serial(async () => {
       let bytes;
       try { bytes = await readFile(file); } catch (err) { if (err.code === "ENOENT") return null; throw err; }
@@ -72,18 +73,47 @@ export function createBoutyQueue(file) {
   }
   async function read() {
     let raw;
-    try { raw = await readFile(file, "utf8"); } catch (err) { if (err.code === "ENOENT") return []; throw err; }
+    try { raw = await readFile(file, "utf8"); }
+    catch (err) { if (err.code === "ENOENT") return { items: [], confirmed: [] }; throw err; }
     const data = JSON.parse(raw);
     if (!Array.isArray(data.items)) throw new Error("The Bouty queue is invalid.");
-    return data.items;
+    return { items: data.items, confirmed: Array.isArray(data.confirmed) ? data.confirmed : [] };
   }
-  async function write(items) { await atomicWrite(file, JSON.stringify({ items })); }
+  const write = (data) => atomicWrite(file, JSON.stringify(data));
   return {
-    list: () => serial(read),
-    enqueue: (item) => serial(async () => {
-      const items = await read();
-      if (!items.some((existing) => existing.id === item.id)) { items.push(item); await write(items); }
+    list: () => serial(async () => (await read()).items),
+    attendance: () => serial(async () => {
+      const { items, confirmed } = await read();
+      return [...confirmed, ...items];
     }),
-    remove: (id) => serial(async () => { const items = await read(); await write(items.filter((item) => item.id !== id)); }),
+    claimLegacy: (owner) => serial(async () => {
+      const data = await read();
+      if (!data.items.some((item) => !item.owner)) return;
+      data.items = data.items.map((item) => item.owner ? item : { ...item, owner });
+      await write(data);
+    }),
+    enqueue: (item) => serial(async () => {
+      const data = await read();
+      if (!data.items.some((existing) => existing.id === item.id)) {
+        data.items.push(item);
+        await write(data);
+      }
+    }),
+    remove: (id) => serial(async () => {
+      const data = await read();
+      data.items = data.items.filter((item) => item.id !== id);
+      await write(data);
+    }),
+    confirm: (id) => serial(async () => {
+      const data = await read();
+      const item = data.items.find((entry) => entry.id === id);
+      if (!item) return;
+      const day = outboxDay(item.at);
+      data.items = data.items.filter((entry) => entry.id !== id);
+      data.confirmed = data.confirmed.filter((entry) =>
+        entry.owner !== item.owner || entry.studentId !== item.studentId || outboxDay(entry.at) !== day);
+      data.confirmed.push(item);
+      await write(data);
+    }),
   };
 }

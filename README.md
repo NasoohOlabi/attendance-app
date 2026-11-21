@@ -1,6 +1,6 @@
 # Masjid Attendance
 
-Windows attendance app for a mosque roster. A ZK4500 fingerprint scan identifies a student by their Marif ID and records attendance on the selected daily sheet or Bouty website. The Pages spreadsheet stores timestamps and fingerprint templates in both modes. The app supports Arabic, enrollment, attendance undo, time corrections, and a persistent queue for network outages.
+Windows attendance app for the Bouty mosque roster. A ZK4500 scan identifies a student by their Marif ID and queues attendance for Bouty. Fingerprint templates stay on this computer.
 
 ## Set up development
 
@@ -15,28 +15,18 @@ Use Windows, Node.js 22.12 or later, Bun 1.4, and the .NET 9 SDK for the scanner
    Copy-Item attendance.config.example.json attendance.config.json
    ```
 
-3. Edit `attendance.config.json`. Set the roster `spreadsheetId`/`sheetGid`, the log `logSpreadsheetId`/`logSheetGid`, and `fingerprintSheetGid`. Set `zk4500Cli` to `staging/scanner/zk4500.exe`. Leave `serviceAccountJson` empty for secure import.
-4. Enable the Google Sheets API for your Google project and share both spreadsheets as Editor with the email in your service-account key.
-5. Run `bun start`.
-6. Open Settings → Service account → Import JSON and choose your Google service-account file.
+3. Set `zk4500Cli` to `staging/scanner/zk4500.exe` in `attendance.config.json`.
+4. Run `bun start` and sign in to Bouty in Settings.
 
-Never commit credentials, real roster data, fingerprint templates, or your local configuration. The example contains no operational identifiers.
+Never commit credentials, real roster data, fingerprint templates, or local configuration.
 
-## Configure the sheets
+## Use the app
 
-The roster's `Info` tab needs `إسم كامل` for the name and `معرف` for the unique Marif ID. Row 1 contains headers, row 2 contains counts, and students start at row 3. Date columns use checkbox rules whose checked value is `حاضر`; unchecked cells are empty. Unknown or duplicate IDs are not marked.
+Sign in once in **Settings**. The app verifies the account on Bouty and saves the credentials with Windows encryption. It reuses one session for roster lookups and writes, and reconnects with the saved account after restarting or when the website session expires. Use **Sign out** to clear the saved account and cookies. Pending attendance is kept for the original account and resumes after signing back in.
 
-The time-log tab uses `الطالب` for the ID and `حضور` for the Damascus timestamp. An optional `إسم` column stores the name. The fingerprint tab uses `student_id`, `fingerprint`, and `created_at`. Fingerprints are sensitive biometric data; restrict access to that spreadsheet and local backups.
+On **Attendance**, use **Search students** to find students by name or number. Page through the roster or select **Refresh** to reload it. Select a student to view their profile or mark them present. Fingerprint enrollment and automatic attendance use the Marif source ID from the student's Bouty notes. The active course needs an existing attendance day with group sessions.
 
-The sheet GID is the numeric `gid` in a tab's URL. The spreadsheet ID is the identifier between `/d/` and `/edit`.
-
-## Run the installed app
-
-### Attendance destination
-
-In Settings → General, choose either the daily attendance sheet or the Bouty website. Both choices continue to use the Pages spreadsheet for attendance timestamps and fingerprint templates. In Bouty mode, the daily attendance grid is not read or written: the fingerprint picker searches Bouty, and a matched student's displayed name and details come from Bouty. The local fingerprint index keeps the ID and a name hint for looking up an existing print. If the site cannot verify the identity, the app shows the ID and an unavailable message instead of old sheet details.
-
-In Settings → Bouty, enter the Bouty username and password and save. They are encrypted for the current Windows account. The app looks up the student by a name hint and the source ID in their Bouty notes, treating the roster's zero-padded ID as the corresponding numeric source ID. It then finds their active enrolment in the default course and checks that the enrolment is in that day's group. If a student, enrolment or day is missing or ambiguous, the scan stays queued. The roster and the Bouty student notes must contain the same source ID, and an attendance day with group sessions must already exist on the site. For new fingerprints, search the site's students by name; entries without a unique source ID are not offered for assignment.
+Today and the dashboard reflect attendance recorded by this installation. The arrival clock shows the local scan time. Manage corrections and view attendance from other devices on Bouty.
 
 The advanced settings allow explicit IDs when automatic lookup is unavailable:
 
@@ -49,17 +39,9 @@ The advanced settings allow explicit IDs when automatic lookup is unavailable:
 }
 ```
 
-These numbers are examples, not actual IDs. Create the day and its group sessions on Bouty first. Verify enrolment and status IDs before overriding automatic lookup, and keep earlier date entries until their queued scans have synced. The app does not create attendance days or groups; adding a group on Bouty can mark all its students present, so review its defaults. A missing mapping, missing day, login failure, or network failure leaves scans in the separate Bouty queue and shows a status message. Removing a student from today's list queues an Absent status. Fingerprints are not sent to Bouty. The request includes the scan timestamp as `changed_at`, but Bouty entry-time persistence has not been verified.
+Use the IDs shown on Bouty. Keep earlier dates in the mapping until their queued scans have synced. Adding a group session on Bouty can mark the entire group present, so review the defaults before creating one. **Undo** sends an Absent status for the selected student.
 
-Open Settings → Service account → Import JSON to import or replace your Google account. Set the roster fields on the General page. Advanced log/fingerprint settings can be supplied in `%APPDATA%\attendance-service\attendance.config.json`. That legacy profile name is retained so upgrades keep existing settings and renderer preferences. The display name remains Masjid Attendance.
-
-The imported account is encrypted under `~/Masjid/v1/config/service-account.enc`, beside the fingerprint store. Electron's asynchronous safeStorage API uses Windows DPAPI to protect the encryption key for your Windows account. There is no separate plaintext encryption-key file. The decrypted key stays in the main process and is not sent to the page or written to a temporary plaintext file. The original downloaded JSON is left untouched.
-
-This protects stored data from other Windows users; it does not protect against malware running as you. Moving the encrypted file to another Windows account can make it unreadable; import the original account there instead. If secure Windows storage is unavailable, importing fails rather than saving plaintext. Existing external key paths keep working until you import an encrypted copy.
-
-See [Electron safeStorage security semantics](https://www.electronjs.org/docs/latest/api/safe-storage). If an old installer exposed your key, revoke/replace it first; encrypting an exposed key does not invalidate its old copies.
-
-Templates live under `~/Masjid/v1/fingerprints/templates/`; logs under `~/Masjid/logs/`; queued attendance under `~/Masjid/attendance-outbox.json`. Settings → Delete all fingerprints clears local prints and fingerprint sheet rows. It leaves the attendance sheet unchanged.
+Existing local templates stay in `~/Masjid/v1/fingerprints/templates/`. Delete individual templates from **Fingerprints**, or clear them all in **Settings**. Bouty credentials and its attendance queue live in `~/Masjid/v1/config/`. Historical Google Sheets and the old Sheets queue are left on disk or in Google Drive and can be consulted separately.
 
 ## Verify and build
 

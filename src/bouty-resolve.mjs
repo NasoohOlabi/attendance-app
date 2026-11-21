@@ -8,6 +8,7 @@ function walk(node, test, out = []) {
 }
 function attr(node, name) { return node.attrs?.find((item) => item.name === name)?.value || ""; }
 function content(node) { return node.nodeName === "#text" ? node.value : (node.childNodes || []).map(content).join(" "); }
+function plainText(node) { return content(node).replace(/\s+/g, " ").trim(); }
 function document(html) { return parse(html); }
 function component(html, name) {
   for (const node of walk(document(html), (entry) => Boolean(attr(entry, "wire:snapshot")))) {
@@ -17,11 +18,18 @@ function component(html, name) {
   }
   throw new Error("Bouty page changed.");
 }
-function editIds(html) {
-  const ids = walk(document(html), (node) => /^edit\(\d+\)$/.test(attr(node, "wire:click")))
-    .map((node) => Number(attr(node, "wire:click").match(/\d+/)[0]));
-  if (ids.length >= 15) throw new Error("Bouty search is ambiguous.");
-  return [...new Set(ids)];
+function tableRows(tree) {
+  const rows = new Map();
+  for (const row of walk(tree, (node) => node.tagName === "tr")) {
+    const button = walk(row, (node) => /^edit\(\d+\)$/.test(attr(node, "wire:click")))[0];
+    if (!button) continue;
+    const id = Number(attr(button, "wire:click").match(/\d+/)[0]);
+    rows.set(id, walk(row, (node) => node.tagName === "td").map((cell) => {
+      const name = walk(cell, (node) => attr(node, "class").split(" ").includes("student-inline__name"))[0];
+      return plainText(name || cell);
+    }));
+  }
+  return rows;
 }
 function sourceIds(notes) {
   const marker = "معرف المصدر:";
@@ -77,34 +85,43 @@ function siteProfile(data, html, studentNumber = "") {
     if (text) fields.push({ label, value: text, kind });
   };
   const tree = document(html);
-  const grade = walk(tree, (node) => attr(node, "id") === "student-grade-level")[0];
-  const selected = grade && walk(grade, (node) => node.tagName === "option" && attr(node, "value") === String(data.grade_level_id ?? ""))[0];
+  function optionText(id, value) {
+    if (!value) return "";
+    const select = walk(tree, (node) => attr(node, "id") === id)[0];
+    const option = select && walk(select, (node) => node.tagName === "option" && attr(node, "value") === String(value))[0];
+    return option ? plainText(option) : "";
+  }
   add("رقم الطالب", studentNumber);
-  if (data.grade_level_id && selected) add("المرحلة الدراسية", content(selected));
-  if (data.birth_date) add("سنة الميلاد", String(data.birth_date).slice(0, 4));
+  add("المرحلة الدراسية", optionText("student-grade-level", data.grade_level_id));
+  add("تاريخ الميلاد", data.birth_date);
+  add("ولي الأمر", optionText("student-parent", data.parent_id), "line");
   add("المدرسة", data.school_name, "line");
   add("هاتف الطالب", data.student_phone, "phone");
   add("الجزء الحالي", data.quran_current_juz_number);
+  add("الأجزاء المحفوظة سابقاً", data.external_memorized_juz_input, "line");
   add("الجنس", ({ male: "ذكر", female: "أنثى" })[data.gender] || data.gender);
   add("الحالة", ({ active: "نشط", inactive: "غير نشط", graduated: "متخرج", blocked: "موقوف" })[data.status] || data.status);
   add("تاريخ الانضمام", data.joined_at);
+  add("ملاحظات", data.notes, "line");
   return { studentName: [data.first_name, data.last_name].filter(Boolean).join(" ").trim(), fields };
 }
 
 /** Resolves only exact source IDs and an active enrolment in the site's default course. */
-export function createBoutyResolver({ page, csrf }) {
+export function createBoutyResolver({ origin, page, csrf }) {
   const groupCache = new Map();
   async function load(path, name) {
     const html = await (await page(path)).text();
     const tree = document(html);
     const script = walk(tree, (node) => Boolean(attr(node, "data-update-uri")))[0];
-    const url = new URL(attr(script || {}, "data-update-uri"));
-    if (url.origin !== "https://albouty.saas.hassiba.tech") throw new Error("Unexpected Bouty update URL.");
+    if (!script) throw new Error("Bouty page changed.");
+    const url = new URL(attr(script, "data-update-uri"), origin);
+    if (url.origin !== origin) throw new Error("Bouty returned an unexpected update URL.");
     const found = component(html, name);
     return { html, snapshot: found.snapshot, data: found.value.data, url: url.href };
   }
   async function call(ctx, method, updates = {}, params = []) {
-    const response = await page(new URL(ctx.url).pathname, {
+    const { pathname, search } = new URL(ctx.url);
+    const response = await page(pathname + search, {
       method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json", "X-Livewire": "true" },
       body: JSON.stringify({ _token: csrf(), components: [{ snapshot: ctx.snapshot, updates, calls: method ? [{ path: "", method, params }] : [] }] }),
     });
@@ -115,21 +132,32 @@ export function createBoutyResolver({ page, csrf }) {
     ctx.data = JSON.parse(updated.snapshot).data;
     ctx.html = updated.effects?.html || ctx.html;
   }
+  function hasNextPage(tree) {
+    return walk(tree, (node) => /^nextPage\(/.test(attr(node, "wire:click")) &&
+      !node.attrs.some((item) => item.name === "disabled")).length > 0;
+  }
+  async function roster(query, pageNumber) {
+    const ctx = await load("/students", "students.index");
+    const updates = query ? { search: query } : {};
+    if (pageNumber > 1) await call(ctx, "gotoPage", updates, [pageNumber, "page"]);
+    else if (query) await call(ctx, null, updates);
+    const tree = document(ctx.html);
+    const students = [...tableRows(tree)].map(([id, cells]) => ({ id, studentName: cells[0], studentNumber: cells[1] || "" }));
+    return { students, hasNext: hasNextPage(tree) };
+  }
+  async function editStudent(ctx, id, studentNumber) {
+    await call(ctx, "edit", {}, [id]);
+    if (Number(ctx.data.editingId) !== id || !ctx.data.first_name) throw new Error("Bouty student information is unavailable.");
+    return { id, studentNumber, sourceIds: sourceIds(ctx.data.notes), ...siteProfile(ctx.data, ctx.html, studentNumber) };
+  }
   async function studentsFor(query) {
     if (!query?.trim()) return [];
     const ctx = await load("/students", "students.index");
     await call(ctx, null, { search: query });
-    const numbers = new Map();
-    for (const row of walk(document(ctx.html), (node) => node.tagName === "tr")) {
-      const button = walk(row, (node) => /^edit\(\d+\)$/.test(attr(node, "wire:click")))[0];
-      const cells = walk(row, (node) => node.tagName === "td");
-      if (button && cells[1]) numbers.set(Number(attr(button, "wire:click").match(/\d+/)[0]), content(cells[1]).replace(/\s+/g, " ").trim());
-    }
+    const tree = document(ctx.html);
+    if (hasNextPage(tree)) throw new Error("Bouty search is ambiguous.");
     const profiles = [];
-    for (const id of editIds(ctx.html)) {
-      await call(ctx, "edit", {}, [id]);
-      profiles.push({ id, sourceIds: sourceIds(ctx.data.notes), ...siteProfile(ctx.data, ctx.html, numbers.get(id)) });
-    }
+    for (const [id, cells] of tableRows(tree)) profiles.push(await editStudent(ctx, id, cells[1] || ""));
     return profiles;
   }
   async function student({ studentId, studentName }) {
@@ -149,23 +177,19 @@ export function createBoutyResolver({ page, csrf }) {
   async function enrollment(matched) {
     const enrollments = await load("/enrollments", "enrollments.index");
     await call(enrollments, null, { search: matched.studentName });
-    const groups = new Map();
-    for (const row of walk(document(enrollments.html), (node) => node.tagName === "tr")) {
-      const button = walk(row, (node) => /^edit\(\d+\)$/.test(attr(node, "wire:click")))[0];
-      const cells = walk(row, (node) => node.tagName === "td");
-      if (button && cells[2]) groups.set(Number(attr(button, "wire:click").match(/\d+/)[0]), content(cells[2]).replace(/\s+/g, " ").trim());
-    }
+    const tree = document(enrollments.html);
+    if (hasNextPage(tree)) throw new Error("Bouty search is ambiguous.");
     const found = [];
-    for (const id of editIds(enrollments.html)) {
+    for (const [id, cells] of tableRows(tree)) {
       await call(enrollments, "edit", {}, [id]);
-      if (String(enrollments.data.student_id) === String(matched.id) && enrollments.data.status === "active") found.push(id);
+      if (String(enrollments.data.student_id) === String(matched.id) && enrollments.data.status === "active") {
+        found.push({ id, group: cells[2], course: cells[3], enrolledAt: enrollments.data.enrolled_at });
+      }
     }
     if (found.length !== 1) throw new Error("Bouty active enrolment is missing or ambiguous.");
-    return { id: found[0], group: groups.get(found[0]) || "" };
+    return found[0];
   }
   async function resolve({ studentId, studentName, date, kind }) {
-    const matched = await student({ studentId, studentName });
-    const enrolled = await enrollment(matched);
     const attendance = await load("/attendance", "attendance.index");
     const course = String(attendance.data.course_id || "");
     await call(attendance, "openCreateModal", { search: date });
@@ -185,7 +209,10 @@ export function createBoutyResolver({ page, csrf }) {
         if (match) days.push(Number(match[1]));
       }
     }
-    if (days.length !== 1) throw new Error("Bouty attendance day is missing or ambiguous.");
+    if (!days.length) throw new Error("Bouty has no attendance day for this date.");
+    if (days.length > 1) throw new Error("Bouty attendance day is missing or ambiguous.");
+    const matched = await student({ studentId, studentName });
+    const enrolled = await enrollment(matched);
     const detail = await (await page(`/attendance/days/students/${days[0]}`)).text();
     const links = walk(document(detail), (node) => node.tagName === "a").map((node) => attr(node, "href").match(/\/student-attendance\/groups\/(\d+)(?:[?#]|$)/)?.[1]).filter(Boolean);
     const matches = [];
@@ -214,14 +241,22 @@ export function createBoutyResolver({ page, csrf }) {
     if (matches.length !== 1 || !Number.isSafeInteger(matches[0]) || matches[0] < 1) throw new Error("Bouty enrolment is not in the attendance day.");
     return { dayId: days[0], enrollmentId: enrolled.id, statusId: matches[0] };
   }
-  resolve.student = async (input) => {
-    const profile = await student(input);
+  async function withEnrollment(profile) {
     try {
       const current = await enrollment(profile);
       if (current.group) profile.fields.push({ label: "المجموعة", value: current.group, kind: "chip" });
+      if (current.course) profile.fields.push({ label: "الدورة", value: current.course, kind: "chip" });
+      if (current.enrolledAt) profile.fields.push({ label: "تاريخ التسجيل", value: current.enrolledAt, kind: "chip" });
     } catch { /* The profile remains useful if no unique active enrolment is available. */ }
     return profile;
+  }
+  resolve.student = async (input) => withEnrollment(await student(input));
+  resolve.studentById = async (id, studentNumber) => {
+    const ctx = await load("/students", "students.index");
+    const number = tableRows(document(ctx.html)).get(id)?.[1] || studentNumber;
+    return withEnrollment(await editStudent(ctx, id, number));
   };
+  resolve.roster = roster;
   resolve.studentsFor = studentsFor;
   return resolve;
 }

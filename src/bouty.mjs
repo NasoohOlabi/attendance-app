@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createBoutyResolver } from "./bouty-resolve.mjs";
 
 // This endpoint is the one used by the site's manual attendance controls.
-const ORIGIN = "https://albouty.saas.hassiba.tech";
+const ORIGIN = "https://albouty.saas.alkheir-platform.com";
 
 function positiveInteger(value, field) {
   const number = Number(value);
@@ -16,15 +16,29 @@ export function createBoutyClient(fetch) {
   let userId = "";
 
   async function page(path, options = {}) {
-    // Electron's session.fetch can return an empty response.url. Reject redirects
-    // before the request is sent so the fixed origin remains the trust boundary.
-    const response = await fetch(`${ORIGIN}${path}`, { ...options, credentials: "include", redirect: "error", signal: AbortSignal.timeout(30000) });
+    const expired = () => Object.assign(new Error("Bouty session expired."), { code: "BOUTY_SESSION_EXPIRED" });
+    // Electron can cancel a manual redirect after receiving headers.
+    const response = await fetch(`${ORIGIN}${path}`, { ...options, credentials: "include", redirect: "manual", signal: AbortSignal.timeout(30000) })
+      .catch((error) => { throw error?.message === "Redirect was cancelled" ? expired() : new Error("Bouty connection failed."); });
+    if ([301, 302, 303, 307, 308, 401, 419].includes(response.status) || response.type === "opaqueredirect") throw expired();
     if (!response.ok || (response.url && new URL(response.url).origin !== ORIGIN)) throw new Error("Bouty connection failed.");
     return response;
   }
 
-  const resolve = createBoutyResolver({ page, csrf: () => csrf });
+  const resolve = createBoutyResolver({ origin: ORIGIN, page, csrf: () => csrf });
   return {
+    async logout() {
+      const token = csrf;
+      csrf = "";
+      userId = "";
+      if (!token) return;
+      await fetch(`${ORIGIN}/logout`, {
+        method: "POST", credentials: "include", redirect: "manual",
+        signal: AbortSignal.timeout(5000),
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ _token: token }).toString(),
+      });
+    },
     async login(username, password) {
       csrf = "";
       userId = "";
@@ -44,7 +58,7 @@ export function createBoutyClient(fetch) {
         });
       } catch (error) {
         // Electron cancels manual redirects after receiving the session cookie.
-        if (error?.message !== "Redirect was cancelled") throw error;
+        if (error?.message !== "Redirect was cancelled") throw new Error("Bouty connection failed.");
       }
       if (response && response.status !== 302 && response.status !== 303 && response.type !== "opaqueredirect") throw new Error("Bouty login failed.");
       const location = response?.headers.get("location");
@@ -52,7 +66,7 @@ export function createBoutyClient(fetch) {
         const destination = new URL(location, ORIGIN);
         if (destination.origin !== ORIGIN || ["/login", "/change-temporary-password"].includes(destination.pathname)) throw new Error("Bouty login failed.");
       }
-      const attendanceResponse = await page("/attendance");
+      const attendanceResponse = await page("/attendance").catch(() => { throw new Error("Bouty could not verify the sign-in."); });
       const attendance = await attendanceResponse.text();
       const nextCsrf = attendance.match(/<meta\b[^>]*name=["']csrf-token["'][^>]*content=["']([^"']+)["']/i)?.[1];
       const nextUser = attendance.match(/\bdata-current-user-id=["'](\d+)["']/i)?.[1];
@@ -72,6 +86,14 @@ export function createBoutyClient(fetch) {
     async studentsFor(query) {
       if (!csrf || !userId) throw new Error("Sign in to Bouty first.");
       return resolve.studentsFor(query);
+    },
+    async roster(query, pageNumber) {
+      if (!csrf || !userId) throw new Error("Sign in to Bouty first.");
+      return resolve.roster(query, positiveInteger(pageNumber, "roster page"));
+    },
+    async studentById(id, studentNumber) {
+      if (!csrf || !userId) throw new Error("Sign in to Bouty first.");
+      return resolve.studentById(positiveInteger(id, "student ID"), studentNumber);
     },
     async mark({ dayId, enrollmentId, statusId, changedAt, operationId }) {
       if (!csrf || !userId) throw new Error("Sign in to Bouty first.");

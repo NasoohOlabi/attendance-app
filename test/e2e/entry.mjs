@@ -4,6 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { mkdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { mockBouty } from "./fixtures/bouty.mjs";
 
 const root = process.env.ATTENDANCE_E2E_ROOT;
 const endpoint = new URL(process.env.ATTENDANCE_E2E_ENDPOINT);
@@ -45,6 +46,7 @@ GoogleAuth.prototype.getClient = async () => ({
 });
 
 app.on("ready", () => {
+  mockBouty(session);
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
     const url = new URL(details.url);
     const allowed = ["file:", "print:", "devtools:", "data:"].includes(url.protocol);
