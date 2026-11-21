@@ -21,6 +21,7 @@ export function mockBouty(session) {
   session.fromPartition("bouty-students").fetch = async (url, opts = {}) => {
     if (new URL(url).origin !== origin) throw new Error("Unexpected synthetic Bouty origin");
     const pathname = new URL(url).pathname;
+    if (globalThis.boutyTestDisconnected) throw new Error("Synthetic network unavailable");
     if (pathname === "/login" && opts.method === "POST") {
       const form = new URLSearchParams(opts.body);
       if (!form.get("login")?.startsWith("synthetic-") || form.get("password") !== "synthetic-password") {
@@ -58,8 +59,11 @@ export function mockBouty(session) {
       const request = JSON.parse(opts.body).components[0], state = JSON.parse(request.snapshot);
       const action = request.calls[0];
       if (state.memo.name === "students.index" && action?.method === "edit") {
-        const [first_name, last_name] = globalThis.boutyTestProfileName || ["Website", "Student"];
-        Object.assign(state.data, { editingId: action.params[0], first_name, last_name, notes: "معرف المصدر: 5", school_name: "Website School" });
+        const [first_name, last_name] = action.params[0] === 9
+          ? globalThis.boutyTestProfileName || ["Website", "Student"]
+          : ["Another", "Student"];
+        const sourceId = action.params[0] === 9 ? 5 : 6;
+        Object.assign(state.data, { editingId: action.params[0], first_name, last_name, notes: `معرف المصدر: ${sourceId}`, school_name: "Website School" });
       }
       if (state.memo.name === "enrollments.index" && action?.method === "edit") Object.assign(state.data, { student_id: 9, status: "active" });
       const rendered = state.memo.name === "students.index" ? roster(action?.method === "gotoPage" ? action.params[0] : 1, request.updates.search)

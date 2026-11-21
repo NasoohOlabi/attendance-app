@@ -136,14 +136,21 @@ export function createBoutyResolver({ origin, page, csrf }) {
     return walk(tree, (node) => /^nextPage\(/.test(attr(node, "wire:click")) &&
       !node.attrs.some((item) => item.name === "disabled")).length > 0;
   }
-  async function roster(query, pageNumber) {
+  async function roster(query, pageNumber, includeProfiles = false) {
     const ctx = await load("/students", "students.index");
     const updates = query ? { search: query } : {};
     if (pageNumber > 1) await call(ctx, "gotoPage", updates, [pageNumber, "page"]);
     else if (query) await call(ctx, null, updates);
     const tree = document(ctx.html);
     const students = [...tableRows(tree)].map(([id, cells]) => ({ id, studentName: cells[0], studentNumber: cells[1] || "" }));
-    return { students, hasNext: hasNextPage(tree) };
+    const hasNext = hasNextPage(tree);
+    if (!includeProfiles) return { students, hasNext };
+    const profiles = [];
+    for (const student of students) {
+      const profile = await editStudent(ctx, student.id, student.studentNumber);
+      profiles.push({ ...profile, rosterName: student.studentName });
+    }
+    return { students: profiles, hasNext };
   }
   async function editStudent(ctx, id, studentNumber) {
     await call(ctx, "edit", {}, [id]);
@@ -257,6 +264,7 @@ export function createBoutyResolver({ origin, page, csrf }) {
     return withEnrollment(await editStudent(ctx, id, number));
   };
   resolve.roster = roster;
+  resolve.rosterProfiles = (pageNumber) => roster("", pageNumber, true);
   resolve.studentsFor = studentsFor;
   return resolve;
 }

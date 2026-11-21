@@ -61,6 +61,8 @@ const AR = {
   "Bouty could not verify the sign-in.": "تعذّر التحقق من تسجيل الدخول إلى البوطي.",
   "Bouty login failed.": "تعذّر تسجيل الدخول إلى البوطي.",
   "Browse Bouty students": "تصفّح طلاب البوطي",
+  "Connect to Bouty to save the student list for offline use.": "اتصل بالبوطي لحفظ قائمة الطلاب للاستخدام دون إنترنت.",
+  "Showing saved Bouty students.": "تُعرض قائمة طلاب البوطي المحفوظة.",
   "Sign in to Bouty": "تسجيل الدخول إلى البوطي",
   "Signed in to Bouty": "تم تسجيل الدخول إلى البوطي",
   "Signed out of Bouty": "تم تسجيل الخروج من البوطي",

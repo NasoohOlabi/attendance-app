@@ -5,9 +5,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, safeStorage, session } from "electron";
 import electronUpdater from "electron-updater";
 import { createBoutyClient } from "../bouty.mjs";
-import { createBoutyCredentials, createBoutyQueue, parseBoutyMapping } from "../bouty-storage.mjs";
+import { createBoutyCredentials, createBoutyQueue, createBoutyRosterCache, parseBoutyMapping } from "../bouty-storage.mjs";
 import { createBoutySync } from "../bouty-sync.mjs";
-import { applyBoutyProfile, boutyStudentChoices } from "../bouty-resolve.mjs";
+import { applyBoutyProfile, boutyStudentChoices, normalizeBoutySourceId } from "../bouty-resolve.mjs";
 import { legacyUserDataPath, loadConfig, scannerExeInResources, updateChannelPreferencePath } from "../config.mjs";
 import { appLogFile, startAppLog } from "../log.mjs";
 import { updaterChannel, updaterErrorDetails, updaterInfoDetails, updaterShouldOffer } from "../update.mjs";
@@ -77,7 +77,9 @@ let present = [];
 let boutyLookupTail = Promise.resolve();
 let boutyAccountVersion = 0;
 const boutyNames = new Map();
-let boutySearch = { query: "", until: 0, promise: null };
+let rosterCache;
+let roster = null;
+let rosterRefresh = null;
 
 function accountKey(username) {
   return createHash("sha256").update(username.trim().toLowerCase()).digest("hex");
@@ -102,15 +104,52 @@ function withBoutyLookup(fn) {
   });
 }
 
+function refreshRoster() {
+  const owner = boutyOwner;
+  const version = boutyAccountVersion;
+  if (!owner || boutySigningOut) return Promise.reject(new Error("Bouty: sign in to look up students."));
+  if (rosterRefresh?.version === version) return rosterRefresh.promise;
+  const promise = (async () => {
+    const students = new Map();
+    for (let page = 1; ; page += 1) {
+      if (version !== boutyAccountVersion || boutySigningOut) throw new Error("Bouty account changed.");
+      const result = await withBoutyLookup((api) => api.rosterProfiles(page));
+      for (const profile of result.students) {
+        if (students.has(profile.id)) throw new Error("Bouty roster changed during refresh.");
+        students.set(profile.id, profile);
+      }
+      if (!result.hasNext) break;
+      if (!result.students.length) throw new Error("Bouty roster changed during refresh.");
+    }
+    return serialBouty(async () => {
+      if (version !== boutyAccountVersion || boutySigningOut) throw new Error("Bouty account changed.");
+      const snapshot = [...students.values()];
+      await rosterCache.save(owner, snapshot);
+      roster = snapshot;
+      cached = {};
+      return snapshot;
+    });
+  })().finally(() => {
+    if (rosterRefresh?.promise === promise) rosterRefresh = null;
+  });
+  rosterRefresh = { version, promise };
+  return promise;
+}
+
 function loadBoutyProfile(student, at) {
   const id = canonicalStudentId(student.studentId);
   if (!id) return;
-  void withBoutyLookup((api) => api.student({ studentId: id, studentName: student.studentName || "" }))
-    .then((profile) => {
+  const matching = (roster || []).filter((profile) => profile.sourceIds.some((source) => normalizeBoutySourceId(source) === normalizeBoutySourceId(id)));
+  const show = (profile) => {
       boutyNames.set(id, profile.studentName);
       const match = applyBoutyProfile(state.lastMatch, at, id, profile, "bouty");
       if (match) publish({ lastMatch: match, present: shownPresent() });
-    }).catch(() => {
+  };
+  if (matching.length === 1) show(matching[0]);
+  if (!net.isOnline() && matching.length === 1) return;
+  void withBoutyLookup((api) => api.student({ studentId: id, studentName: student.studentName || "" }))
+    .then(show).catch(() => {
+      if (matching.length === 1) return;
       if (!boutyEnabled || state.lastMatch?.at !== at || canonicalStudentId(state.lastMatch?.studentId) !== id) return;
       publish({ lastMatch: { ...state.lastMatch, profileStatus: "Bouty student information is unavailable." } });
     });
@@ -136,12 +175,14 @@ async function setupBouty() {
   } catch (err) {
     if (err.code !== "ENOENT") publishBouty("Bouty settings could not be read.");
   }
+  rosterCache = createBoutyRosterCache(path.join(dir, "bouty-roster.enc"), safeStorage);
   boutyQueue = createBoutyQueue(path.join(dir, "bouty-outbox.json"));
   try {
     const account = await boutyCredentials.read();
     if (account) {
       boutyOwner = accountKey(account.username);
       await boutyQueue.claimLegacy(boutyOwner);
+      roster = await rosterCache.read(boutyOwner);
       boutyEnabled = true;
     }
   } catch {
@@ -464,7 +505,6 @@ function markDetail(plan) {
 
 function showPending(gen, reason = "") {
   cached = {};
-  boutySearch = { query: "", until: 0, promise: null };
   publish({ phase: "pending", headline: "New fingerprint", detail: reason || "Search Bouty for the student.", error: "", canCloseSettings: true, enroll: null }, gen);
 }
 
@@ -1008,7 +1048,6 @@ async function assignStudent(key) {
   pending = null;
   const cacheKey = student.rowNumber ? String(student.rowNumber) : studentKey(draft);
   cached[cacheKey] = { ...cached[cacheKey], ...draft };
-  boutySearch = { query: "", until: 0, promise: null };
 
   const linked = {
     phase: "ready",
@@ -1181,7 +1220,6 @@ function resetBoutyView() {
   boutyAccountVersion += 1;
   boutyNames.clear();
   cached = {};
-  boutySearch = { query: "", until: 0, promise: null };
   publish({ lastMatch: null });
 }
 
@@ -1205,6 +1243,7 @@ function registerIpc() {
         boutyOwner = accountKey(input.username);
         boutyEnabled = true;
         resetBoutyView();
+        roster = await rosterCache.read(boutyOwner);
         await publishAttendance();
       } else if (!boutyEnabled) throw new Error("Enter the Bouty username and password.");
       const temporary = `${boutyContext.file}.tmp`;
@@ -1214,6 +1253,7 @@ function registerIpc() {
       boutySettings = settings;
       publishBouty("");
       void boutySync.sync();
+      if (!roster) void refreshRoster().catch(() => {});
       return { ok: true };
     } catch (error) { return { ok: false, error: error.message }; }
   }));
@@ -1223,6 +1263,8 @@ function registerIpc() {
     try {
       return await serialBouty(async () => {
         await boutyCredentials.clear();
+        await rosterCache.clear().catch(() => {});
+        roster = null;
         boutyOwner = null;
         boutyEnabled = false;
         resetBoutyView();
@@ -1236,21 +1278,40 @@ function registerIpc() {
   });
   ipcMain.handle("getState", () => state);
   ipcMain.handle("updateAction", () => updateAction());
-  ipcMain.handle("boutyRoster", async (_event, { query, page } = {}) => {
-    if (!currentConfig) return { error: "The app is still starting." };
+  ipcMain.handle("boutyRoster", async (_event, { query, page = 1, refresh } = {}) => {
+    if (!boutyOwner || boutySigningOut) return { error: "Bouty: sign in to look up students." };
+    let notice = "";
+    const version = boutyAccountVersion;
     try {
-      return await withBoutyLookup((api) => api.roster(String(query || "").trim().slice(0, 120), page));
-    } catch (error) {
-      return { error: error?.message?.startsWith("Bouty") ? error.message : "Bouty student information is unavailable." };
+      if (refresh || !roster) await refreshRoster();
+    } catch {
+      notice = "Showing saved Bouty students.";
     }
+    if (version !== boutyAccountVersion || boutySigningOut) return { error: "Bouty account changed." };
+    if (!roster) return { error: "Connect to Bouty to save the student list for offline use." };
+    const text = String(query || "").trim().slice(0, 120);
+    const students = roster.map(({ id, rosterName, studentName, studentNumber }) =>
+      ({ id, studentName: rosterName || studentName, studentNumber, studentId: studentNumber }));
+    const filtered = text ? fuzzyStudents(students, text) : students;
+    const number = Number.isSafeInteger(page) && page > 0 ? page : 1;
+    return { students: filtered.slice((number - 1) * 15, number * 15), hasNext: filtered.length > number * 15, notice };
   });
   ipcMain.handle("boutyStudent", async (_event, { id, studentNumber } = {}) => {
     const config = currentConfig;
-    if (!config) return { error: "The app is still starting." };
+    const version = boutyAccountVersion;
+    if (!config || !boutyOwner || boutySigningOut) return { error: "Bouty: sign in to look up students." };
+    const saved = roster?.find((entry) => entry.id === Number(id));
     try {
-      const profile = await withBoutyLookup((api) => api.studentById(id, String(studentNumber || "").slice(0, 32)));
+      const profile = net.isOnline() || !saved
+        ? await withBoutyLookup((api) => api.studentById(id, String(studentNumber || "").slice(0, 32))).catch((error) => {
+          if (!saved) throw error;
+          return saved;
+        })
+        : saved;
       const index = await loadIndex(config.fingerprintDir);
-      const [choice] = boutyStudentChoices([profile], index.students);
+      if (version !== boutyAccountVersion || boutySigningOut) return { error: "Bouty account changed." };
+      const candidates = roster ? roster.map((entry) => entry.id === profile.id ? profile : entry) : [profile];
+      const choice = boutyStudentChoices(candidates, index.students).find((entry) => entry.siteId === profile.id);
       if (choice) boutyNames.set(choice.studentId, profile.studentName);
       return { studentName: profile.studentName, studentId: choice?.studentId || "", fields: profile.fields };
     } catch (error) {
@@ -1258,38 +1319,31 @@ function registerIpc() {
     }
   });
   ipcMain.handle("filter", async (_event, query) => {
-    if (currentConfig) {
+    const config = currentConfig;
+    const version = boutyAccountVersion;
+    if (!config || !boutyOwner || boutySigningOut) return { students: [], error: "Bouty: sign in to look up students." };
+    try {
+      const profiles = roster ?? await refreshRoster();
+      const index = await loadIndex(config.fingerprintDir);
+      const names = await listTemplateNames(config);
+      if (version !== boutyAccountVersion || boutySigningOut || currentConfig !== config) return { students: [] };
+      const choices = boutyStudentChoices(profiles, index.students);
       const text = String(query || "").trim().slice(0, 120);
-      if (text.length < 2) return { students: [], error: "Type at least two characters to search Bouty." };
-      if (boutySearch.query !== text || boutySearch.until <= Date.now()) {
-        const config = currentConfig;
-        const promise = withBoutyLookup((api) => api.studentsFor(text)).then(async (profiles) => {
-          const index = await loadIndex(config.fingerprintDir);
-          if (!boutyEnabled || boutySigningOut || currentConfig !== config) return [];
-          const choices = boutyStudentChoices(profiles, index.students);
-          if (profiles.length && !choices.length) throw new Error("Bouty students need an unambiguous source ID.");
-          const names = await listTemplateNames(config);
-          return choices.map((student) => {
-            const key = `bouty:${student.siteId}`;
-            cached[key] = student;
-            boutyNames.set(student.studentId, student.studentName);
-            const printCount = studentTemplateNames(student, names).length;
-            return {
-              key,
-              studentId: student.studentId,
-              studentName: student.studentName,
-              hasPrint: printCount > 0 || Boolean(student.templateFile),
-              printCount,
-            };
-          });
-        });
-        boutySearch = { query: text, until: Date.now() + 30000, promise };
-        promise.catch(() => { if (boutySearch.promise === promise) boutySearch.until = 0; });
+      const numbers = new Map(profiles.map((profile) => [profile.id, profile.studentNumber]));
+      const matches = fuzzyStudents(choices, text);
+      const found = new Set(matches);
+      for (const student of choices) {
+        if (text && numbers.get(student.siteId) === text && !found.has(student)) matches.unshift(student);
       }
-      try { return { students: await boutySearch.promise, error: "" }; }
-      catch (error) { return { students: [], error: error?.message?.startsWith("Bouty") ? error.message : "Bouty student information is unavailable." }; }
+      return { students: matches.map((student) => {
+        const key = `bouty:${student.siteId}`;
+        cached[key] = student;
+        const printCount = studentTemplateNames(student, names).length;
+        return { key, studentId: student.studentId, studentName: student.studentName, printCount };
+      }) };
+    } catch {
+      return { students: [], error: "Connect to Bouty to save the student list for offline use." };
     }
-    return { students: [], error: "The app is still starting." };
   });
   ipcMain.handle("assign", async (_event, key) => {
     try {
@@ -1514,10 +1568,12 @@ if (!app.requestSingleInstanceLock()) {
       await createWindow();
       await startLoop();
       await publishAttendance();
+      if (boutyOwner && !roster) void refreshRoster().catch(() => {});
       if (app.isPackaged) setTimeout(() => checkForUpdates(), 5000);
       void boutySync.sync();
       setInterval(() => {
         void boutySync.sync();
+        if (boutyOwner && !roster && net.isOnline()) void refreshRoster().catch(() => {});
         void publishAttendance().catch((error) => publishBouty(error.message));
       }, (currentConfig?.syncIntervalSeconds || 60) * 1000).unref();
     } catch (err) {

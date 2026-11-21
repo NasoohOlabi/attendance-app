@@ -91,6 +91,10 @@ export function createBoutyClient(fetch) {
       if (!csrf || !userId) throw new Error("Sign in to Bouty first.");
       return resolve.roster(query, positiveInteger(pageNumber, "roster page"));
     },
+    async rosterProfiles(pageNumber) {
+      if (!csrf || !userId) throw new Error("Sign in to Bouty first.");
+      return resolve.rosterProfiles(positiveInteger(pageNumber, "roster page"));
+    },
     async studentById(id, studentNumber) {
       if (!csrf || !userId) throw new Error("Sign in to Bouty first.");
       return resolve.studentById(positiveInteger(id, "student ID"), studentNumber);

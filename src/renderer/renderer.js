@@ -893,7 +893,7 @@ function renderManualList(students) {
   }
 }
 
-async function refreshManual() {
+async function refreshManual(refresh = false) {
   clearTimeout(manualSearchTimer);
   const gen = ++manualGen;
   boutyRosterActions.hidden = false;
@@ -903,12 +903,12 @@ async function refreshManual() {
   boutyRosterPrev.disabled = true;
   boutyRosterNext.disabled = true;
   boutyRosterRefresh.disabled = true;
-  const result = await window.attendance.boutyRoster({ query: manualSearch.value, page: boutyRosterPage });
+  const result = await window.attendance.boutyRoster({ query: manualSearch.value, page: boutyRosterPage, refresh });
   if (gen !== manualGen || manualPick.hidden) return;
   const students = result?.students || [];
   const problem = result?.error || "";
-  manualEmpty.hidden = students.length !== 0 && !problem;
-  manualEmpty.textContent = translate(problem || "No matching students");
+  manualEmpty.hidden = students.length !== 0 && !problem && !result?.notice;
+  manualEmpty.textContent = translate(problem || result?.notice || "No matching students");
   renderManualList(problem ? [] : students);
   boutyRosterPrev.disabled = boutyRosterPage <= 1;
   boutyRosterNext.disabled = !result?.hasNext;
@@ -974,7 +974,7 @@ manualSearch.addEventListener("input", () => {
 });
 boutyRosterPrev.addEventListener("click", () => { boutyRosterPage -= 1; void refreshManual(); });
 boutyRosterNext.addEventListener("click", () => { boutyRosterPage += 1; void refreshManual(); });
-boutyRosterRefresh.addEventListener("click", () => { boutyRosterPage = 1; void refreshManual(); });
+boutyRosterRefresh.addEventListener("click", () => { boutyRosterPage = 1; void refreshManual(true); });
 
 for (const button of document.querySelectorAll("[data-lang]")) {
   button.addEventListener("click", () => chooseLang(button.dataset.lang));
