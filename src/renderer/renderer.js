@@ -308,6 +308,58 @@ async function choose(key) {
   if (!result?.ok) await refreshList();
 }
 
+function addBoutyRow(kind, first = "", second = "") {
+  const row = document.createElement("div");
+  row.className = "override-row";
+  const labels = kind === "days" ? ["Date in Damascus", "Attendance day ID"] : ["Student ID", "Enrolment ID"];
+  for (const [index, title] of labels.entries()) {
+    const label = document.createElement("label");
+    label.className = "field";
+    const caption = document.createElement("span");
+    caption.textContent = translate(title);
+    caption.dataset.i18n = title;
+    const input = document.createElement("input");
+    input.type = index === 1 ? "number" : kind === "days" ? "date" : "text";
+    input.dir = "ltr";
+    input.required = true;
+    if (index === 1) { input.min = "1"; input.step = "1"; }
+    input.value = index === 0 ? first : second;
+    label.append(caption, input);
+    row.append(label);
+  }
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "secondary";
+  remove.textContent = translate("Remove");
+  remove.dataset.i18n = "Remove";
+  remove.addEventListener("click", () => row.remove());
+  row.append(remove);
+  document.querySelector(`#bouty-${kind}`).append(row);
+}
+
+document.querySelector("#add-bouty-day").addEventListener("click", () => addBoutyRow("days"));
+document.querySelector("#add-bouty-link").addEventListener("click", () => addBoutyRow("mapping"));
+
+function readBoutySettings() {
+  for (const input of document.querySelectorAll("#bouty-advanced input")) {
+    if (!input.reportValidity()) return null;
+  }
+  const rows = (kind) => [...document.querySelectorAll(`#bouty-${kind} .override-row`)].map((row) =>
+    [...row.querySelectorAll("input")].map((input) => input.value.trim()));
+  const dates = rows("days");
+  if (new Set(dates.map(([date]) => date)).size !== dates.length) {
+    error.hidden = false;
+    error.textContent = translate("Each attendance date can only be listed once.");
+    return null;
+  }
+  return JSON.stringify({
+    mapping: rows("mapping").map(([studentId, enrollmentId]) => ({ studentId, enrollmentId: Number(enrollmentId) })),
+    days: Object.fromEntries(dates.map(([date, id]) => [date, Number(id)])),
+    presentStatusId: Number(document.querySelector("#bouty-present").value),
+    absentStatusId: Number(document.querySelector("#bouty-absent").value),
+  });
+}
+
 function fillConfig(state) {
   const cfg = state.config || {};
   document.querySelector("#app-version").textContent = state.appVersion || state.update?.version || "—";
@@ -315,9 +367,12 @@ function fillConfig(state) {
   document.querySelector("#cfg-dir").textContent = state.fingerprintDir || cfg.fingerprintDir || "";
   for (const button of document.querySelectorAll("[data-track]")) button.setAttribute("aria-pressed", String(button.dataset.track === (cfg.updateChannel || "stable")));
   const bouty = state.bouty || {};
-  document.querySelector("#bouty-settings").value = JSON.stringify({
-    mapping: bouty.mapping || [], days: bouty.days || {}, presentStatusId: bouty.presentStatusId || 1, absentStatusId: bouty.absentStatusId || 2,
-  }, null, 2);
+  document.querySelector("#bouty-days").replaceChildren();
+  document.querySelector("#bouty-mapping").replaceChildren();
+  for (const [date, id] of Object.entries(bouty.days || {})) addBoutyRow("days", date, id);
+  for (const row of bouty.mapping || []) addBoutyRow("mapping", row.studentId, row.enrollmentId);
+  document.querySelector("#bouty-present").value = bouty.presentStatusId || 1;
+  document.querySelector("#bouty-absent").value = bouty.absentStatusId || 2;
   document.querySelector("#bouty-user").value = "";
   document.querySelector("#bouty-password").value = "";
   cancel.hidden = !state.canCloseSettings;
@@ -822,10 +877,12 @@ for (const button of document.querySelectorAll("[data-track]")) button.addEventL
 });
 async function saveBouty(event) {
   const button = event.currentTarget;
+  const settings = readBoutySettings();
+  if (settings === null) return;
   button.disabled = true;
   try {
     const result = await window.attendance.saveBouty({ username: document.querySelector("#bouty-user").value,
-      password: document.querySelector("#bouty-password").value, settings: document.querySelector("#bouty-settings").value });
+      password: document.querySelector("#bouty-password").value, settings });
     if (!result?.ok) { error.hidden = false; error.textContent = translate(result?.error || "Bouty settings could not be saved."); }
     else { document.querySelector("#bouty-password").value = ""; error.hidden = true; }
   } finally { button.disabled = false; }
